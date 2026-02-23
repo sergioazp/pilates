@@ -503,7 +503,7 @@
         
         // Configuración de Firebase
         const firebaseConfig = {
-            apiKey: "AIzaSyCDLWLdn_LRgeocmWCE0hTl7XbJNLAMx7A",
+            apiKey: "AIzaSyDJDMsiLBABUdPMNaRyfJ-s2MTwse-kX1w",
             authDomain: "marina-pilates-730fb.firebaseapp.com",
             projectId: "marina-pilates-730fb",
             storageBucket: "marina-pilates-730fb.firebasestorage.app",
@@ -1101,11 +1101,10 @@
         };
         
         function App() {
-            const [cargando, setCargando] = useState(true); // true hasta saber si hay sesión
-            const [vista, setVista] = useState('login');
+            const [cargando, setCargando] = useState(true);
             const [userType, setUserType] = useState(null);
             const [usuarioActual, setUsuarioActual] = useState(null);
-            const [authUser, setAuthUser] = useState(null); // Firebase auth user
+            const [authUser, setAuthUser] = useState(null);
             const [alumnos, setAlumnos] = useState([]);
             const [horarios, setHorarios] = useState({});
             const [precios, setPrecios] = useState({});
@@ -1228,26 +1227,23 @@
             }, [authUser]);
             
             // PASO 3: Cuando authUser cambia y tenemos alumnos, resolver vista
-            // PASO 3: Resolver vista según usuario autenticado
+            // PASO 3: Resolver tipo de usuario según email
             useEffect(() => {
-                if (!authUser) return;
+                if (!authUser) {
+                    setUserType(null);
+                    setUsuarioActual(null);
+                    return;
+                }
                 
                 const email = authUser.email;
-                let tipo = 'alumno';
                 if (email === 'marinapilatesestudio@gmail.com') {
-                    tipo = 'admin';
-                }
-                setUserType(tipo);
-                
-                if (tipo === 'admin') {
-                    // Admin no necesita esperar a que carguen alumnos
-                    setVista('dashboard');
-                } else if (alumnos.length > 0) {
-                    // Alumno: esperar a que carguen los datos para encontrar su perfil
+                    setUserType('admin');
+                } else {
+                    setUserType('alumno');
+                    // Buscar perfil del alumno
                     const alumno = alumnos.find(a => a.email === email);
                     if (alumno) {
                         setUsuarioActual(alumno);
-                        setVista('dashboard');
                     }
                 }
             }, [authUser, alumnos]);
@@ -1282,14 +1278,18 @@
             };
             
             const handleLogin = async (tipo, email) => {
+                // PASO 3 se encarga de setear userType y vista via authUser
+                // Este handler solo es fallback por si onAuthStateChanged no alcanza
                 setUserType(tipo);
-                if (tipo === 'alumno') {
-                    // Intentar encontrar el alumno (puede que los datos aún no estén cargados)
-                    const alumno = alumnos.find(a => a.email === email);
-                    if (alumno) setUsuarioActual(alumno);
-                }
-                setVista('dashboard');
             };
+            
+            const handleLogout = () => {
+                firebase.auth().signOut();
+                setUserType(null);
+                setUsuarioActual(null);
+            };
+            
+            // ── RENDERIZADO basado en estado de auth ──
             
             if (cargando) {
                 return (
@@ -1303,23 +1303,12 @@
                 );
             }
             
-            if (vista === 'login' && !authUser) {
+            // Sin usuario autenticado → Login
+            if (!authUser) {
                 return <LoginScreen onLogin={handleLogin} alumnos={alumnos} />;
             }
             
-            // Si hay authUser pero vista es login y aún no tenemos datos, mostrar carga
-            if (vista === 'login' && authUser) {
-                return (
-                    <div className="container">
-                        <div className="loading">
-                            <LogoSVG width={200} style={{margin: '0 auto'}} />
-                            <p>Cargando datos...</p>
-                            <div className="spinner"></div>
-                        </div>
-                    </div>
-                );
-            }
-            
+            // Admin autenticado
             if (userType === 'admin') {
                 return <AdminDashboard 
                     alumnos={alumnos} 
@@ -1334,28 +1323,13 @@
                     solicitudes={solicitudes}
                     setSolicitudes={setSolicitudes}
                     recuperos={recuperos}
-                    onLogout={() => {
-                        firebase.auth().signOut();
-                        setUserType(null);
-                        setUsuarioActual(null);
-                        setVista('login');
-                    }}
+                    onLogout={handleLogout}
                     recargarDatos={cargarDatos}
                 />;
             }
             
-            if (userType === 'alumno') {
-                if (!usuarioActual) {
-                    return (
-                        <div className="container">
-                            <div className="loading">
-                                <LogoSVG width={200} style={{margin: '0 auto'}} />
-                                <p>Cargando tu información...</p>
-                                <div className="spinner"></div>
-                            </div>
-                        </div>
-                    );
-                }
+            // Alumno autenticado con datos cargados
+            if (userType === 'alumno' && usuarioActual) {
                 return <AlumnoDashboard 
                     alumno={usuarioActual}
                     alumnos={alumnos}
@@ -1367,15 +1341,21 @@
                     setCancelacionesAlumno={setCancelacionesAlumno}
                     solicitudes={solicitudes}
                     recuperos={recuperos}
-                    onLogout={() => {
-                        firebase.auth().signOut();
-                        setUserType(null);
-                        setUsuarioActual(null);
-                        setVista('login');
-                    }}
+                    onLogout={handleLogout}
                     recargarDatos={cargarDatos}
                 />;
             }
+            
+            // Estado transitorio: autenticado pero resolviendo tipo/datos
+            return (
+                <div className="container">
+                    <div className="loading">
+                        <LogoSVG width={200} style={{margin: '0 auto'}} />
+                        <p>Cargando datos...</p>
+                        <div className="spinner"></div>
+                    </div>
+                </div>
+            );
         }
         
         function LoginScreen({ onLogin, alumnos }) {
