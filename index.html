@@ -956,16 +956,51 @@
             
             async guardarAlumno(alumno) {
                 if (alumno.id) {
+                    // Obtener email anterior por si cambió
+                    const docAnterior = await db.collection('alumnos').doc(alumno.id).get();
+                    const emailAnterior = docAnterior.exists ? docAnterior.data().email : null;
+                    
                     await db.collection('alumnos').doc(alumno.id).set(alumno);
+                    
+                    // Si el email cambió, actualizar alumnos_autorizados
+                    if (emailAnterior && emailAnterior !== alumno.email) {
+                        // Borrar el viejo
+                        const viejoSnap = await db.collection('alumnos_autorizados').where('email', '==', emailAnterior).get();
+                        viejoSnap.forEach(doc => doc.ref.delete());
+                    }
+                    
+                    // Asegurar que el email actual esté en alumnos_autorizados
+                    const existeSnap = await db.collection('alumnos_autorizados').where('email', '==', alumno.email).get();
+                    if (existeSnap.empty) {
+                        await db.collection('alumnos_autorizados').add({ email: alumno.email });
+                    }
                 } else {
                     const docRef = await db.collection('alumnos').add(alumno);
+                    
+                    // Agregar a alumnos_autorizados
+                    const existeSnap = await db.collection('alumnos_autorizados').where('email', '==', alumno.email).get();
+                    if (existeSnap.empty) {
+                        await db.collection('alumnos_autorizados').add({ email: alumno.email });
+                    }
+                    
                     return docRef.id;
                 }
             },
             
             async eliminarAlumno(alumnoId) {
+                // Obtener email antes de borrar
+                const alumnoDoc = await db.collection('alumnos').doc(alumnoId).get();
+                const email = alumnoDoc.exists ? alumnoDoc.data().email : null;
+                
                 // Eliminar alumno
                 await db.collection('alumnos').doc(alumnoId).delete();
+                
+                // Eliminar de alumnos_autorizados
+                if (email) {
+                    const autSnap = await db.collection('alumnos_autorizados').where('email', '==', email).get();
+                    autSnap.forEach(doc => doc.ref.delete());
+                }
+                
                 // Eliminar sus cancelaciones
                 const cancelaciones = await db.collection('cancelacionesAlumno').where('alumnoId', '==', alumnoId).get();
                 const batch = db.batch();
