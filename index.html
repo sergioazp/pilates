@@ -503,7 +503,7 @@
         
         // Configuración de Firebase
         const firebaseConfig = {
-            apiKey: "AIzaSyDJDMsiLBABUdPMNaRyfJ-s2MTwse-kX1w",
+            apiKey: "AIzaSyA-Z0FfWzThmcHbk5YH2bh-Z60pIkPOLN4",
             authDomain: "marina-pilates-730fb.firebaseapp.com",
             projectId: "marina-pilates-730fb",
             storageBucket: "marina-pilates-730fb.firebasestorage.app",
@@ -1452,6 +1452,13 @@
                 
                 if (nuevaPassword.length < 6) {
                     setError('La contraseña debe tener al menos 6 caracteres');
+                    return;
+                }
+                
+                // ✅ VALIDACIÓN: Verificar que el email esté en la lista de alumnos
+                const alumnoExiste = alumnos.find(a => a.email === email);
+                if (!alumnoExiste) {
+                    setError('❌ Este email no está registrado como alumno. Por favor, contactá a Marina Pilates.');
                     return;
                 }
                 
