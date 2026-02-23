@@ -1101,10 +1101,11 @@
         };
         
         function App() {
-            const [cargando, setCargando] = useState(false); // Cambiar a false - no bloquea el login
+            const [cargando, setCargando] = useState(true); // true hasta saber si hay sesión
             const [vista, setVista] = useState('login');
             const [userType, setUserType] = useState(null);
             const [usuarioActual, setUsuarioActual] = useState(null);
+            const [authUser, setAuthUser] = useState(null); // Firebase auth user
             const [alumnos, setAlumnos] = useState([]);
             const [horarios, setHorarios] = useState({});
             const [precios, setPrecios] = useState({});
@@ -1113,221 +1114,153 @@
             const [solicitudes, setSolicitudes] = useState([]);
             const [recuperos, setRecuperos] = useState([]);
             
-            useEffect(() => {
-                // Cargar datos en background SIN bloquear el login
-                cargarDatos();
-            }, []);
-            
-            // LISTENER EN TIEMPO REAL: Monitorear cambios en alumnos para admin y alumno
-            useEffect(() => {
-                console.log('📡 Agregando listener en tiempo real para alumnos');
-                
-                const unsubscribe = db.collection('alumnos').onSnapshot((snapshot) => {
-                    const alumnosActualizados = snapshot.docs.map(doc => ({
-                        id: doc.id,
-                        ...doc.data()
-                    }));
-                    console.log('📬 Alumnos actualizados desde Firestore:', alumnosActualizados);
-                    setAlumnos(alumnosActualizados);
-                }, (error) => {
-                    console.error('Error en listener de alumnos:', error);
-                });
-                
-                return () => {
-                    console.log('🔌 Limpiando listener de alumnos');
-                    unsubscribe();
-                };
-            }, []);
-            
-            // LISTENER EN TIEMPO REAL: Solicitudes de recupero
-            useEffect(() => {
-                console.log('📡 Agregando listener en tiempo real para solicitudes');
-                
-                const unsubscribe = db.collection('solicitudes').onSnapshot((snapshot) => {
-                    const solicitudesActualizadas = snapshot.docs.map(doc => ({
-                        id: doc.id,
-                        ...doc.data()
-                    }));
-                    console.log('📬 Solicitudes actualizadas desde Firestore:', solicitudesActualizadas);
-                    setSolicitudes(solicitudesActualizadas);
-                }, (error) => {
-                    console.error('Error en listener de solicitudes:', error);
-                });
-                
-                return () => {
-                    console.log('🔌 Limpiando listener de solicitudes');
-                    unsubscribe();
-                };
-            }, []);
-            
-            // LISTENER EN TIEMPO REAL: Recuperos aprobados
-            useEffect(() => {
-                console.log('📡 Agregando listener en tiempo real para recuperos');
-                
-                const unsubscribe = db.collection('recuperos').onSnapshot((snapshot) => {
-                    const recuperosActualizados = snapshot.docs.map(doc => ({
-                        id: doc.id,
-                        ...doc.data()
-                    }));
-                    console.log('📬 Recuperos actualizados desde Firestore:', recuperosActualizados);
-                    setRecuperos(recuperosActualizados);
-                }, (error) => {
-                    console.error('Error en listener de recuperos:', error);
-                });
-                
-                return () => {
-                    console.log('🔌 Limpiando listener de recuperos');
-                    unsubscribe();
-                };
-            }, []);
-            
-            // LISTENER EN TIEMPO REAL: Precios
-            useEffect(() => {
-                console.log('📡 Agregando listener en tiempo real para precios');
-                
-                const unsubscribe = db.collection('config').doc('precios').onSnapshot((doc) => {
-                    if (doc.exists) {
-                        const preciosActualizados = doc.data();
-                        console.log('📬 Precios actualizados desde Firestore:', preciosActualizados);
-                        setPrecios(preciosActualizados);
-                    }
-                }, (error) => {
-                    console.error('Error en listener de precios:', error);
-                });
-                
-                return () => {
-                    console.log('🔌 Limpiando listener de precios');
-                    unsubscribe();
-                };
-            }, []);
-            
-            // LISTENER EN TIEMPO REAL: Horarios
-            useEffect(() => {
-                console.log('📡 Agregando listener en tiempo real para horarios');
-                
-                const unsubscribe = db.collection('config').doc('horarios').onSnapshot((doc) => {
-                    if (doc.exists) {
-                        const horariosActualizados = doc.data();
-                        console.log('📬 Horarios actualizados desde Firestore:', horariosActualizados);
-                        setHorarios(horariosActualizados);
-                    }
-                }, (error) => {
-                    console.error('Error en listener de horarios:', error);
-                });
-                
-                return () => {
-                    console.log('🔌 Limpiando listener de horarios');
-                    unsubscribe();
-                };
-            }, []);
-            
-            // LISTENER EN TIEMPO REAL: CancelacionesAlumno (todas, para admin)
-            useEffect(() => {
-                console.log('📡 Agregando listener en tiempo real para cancelacionesAlumno');
-                
-                const unsubscribe = db.collection('cancelacionesAlumno').onSnapshot((snapshot) => {
-                    const cancelacionesActualizadas = snapshot.docs.map(doc => ({
-                        id: doc.id,
-                        ...doc.data()
-                    }));
-                    console.log('📬 CancelacionesAlumno actualizadas desde Firestore:', cancelacionesActualizadas);
-                    setCancelacionesAlumno(cancelacionesActualizadas);
-                }, (error) => {
-                    console.error('Error en listener de cancelacionesAlumno:', error);
-                });
-                
-                return () => {
-                    console.log('🔌 Limpiando listener de cancelacionesAlumno');
-                    unsubscribe();
-                };
-            }, []);
-            
-            // Persistencia de sesión: detectar si ya hay usuario logueado
+            // PASO 1: Detectar estado de autenticación (esto es lo ÚNICO que corre sin auth)
             useEffect(() => {
                 const unsubscribe = firebase.auth().onAuthStateChanged((user) => {
-                    if (user && vista === 'login') {
-                        const email = user.email;
-                        let tipo = 'alumno';
-                        if (email === 'marinapilatesestudio@gmail.com') {
-                            tipo = 'admin';
-                        }
-                        setUserType(tipo);
-                        if (tipo === 'alumno') {
-                            const alumno = alumnos.find(a => a.email === email);
-                            if (alumno) {
-                                setUsuarioActual(alumno);
-                                setVista('dashboard');
-                            }
-                        } else {
-                            setVista('dashboard');
-                        }
-                    }
+                    console.log('🔑 Auth state changed:', user ? user.email : 'no user');
+                    setAuthUser(user);
+                    setCargando(false);
                 });
                 return () => unsubscribe();
-            }, [alumnos]);
+            }, []);
+            
+            // PASO 2: Cuando hay usuario autenticado, arrancar TODOS los listeners
+            useEffect(() => {
+                if (!authUser) {
+                    // Si no hay user, limpiar todo
+                    setAlumnos([]);
+                    setHorarios({});
+                    setPrecios({});
+                    setCancelaciones([]);
+                    setCancelacionesAlumno([]);
+                    setSolicitudes([]);
+                    setRecuperos([]);
+                    return;
+                }
+                
+                console.log('📡 Usuario autenticado, iniciando listeners...');
+                
+                const unsubscribers = [];
+                
+                // Listener: Alumnos
+                unsubscribers.push(
+                    db.collection('alumnos').onSnapshot((snapshot) => {
+                        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        console.log('📬 Alumnos actualizados:', data.length);
+                        setAlumnos(data);
+                    }, (error) => {
+                        console.error('Error en listener de alumnos:', error);
+                    })
+                );
+                
+                // Listener: Solicitudes
+                unsubscribers.push(
+                    db.collection('solicitudes').onSnapshot((snapshot) => {
+                        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        console.log('📬 Solicitudes actualizadas:', data.length);
+                        setSolicitudes(data);
+                    }, (error) => {
+                        console.error('Error en listener de solicitudes:', error);
+                    })
+                );
+                
+                // Listener: Recuperos
+                unsubscribers.push(
+                    db.collection('recuperos').onSnapshot((snapshot) => {
+                        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        console.log('📬 Recuperos actualizados:', data.length);
+                        setRecuperos(data);
+                    }, (error) => {
+                        console.error('Error en listener de recuperos:', error);
+                    })
+                );
+                
+                // Listener: Precios
+                unsubscribers.push(
+                    db.collection('config').doc('precios').onSnapshot((doc) => {
+                        if (doc.exists) {
+                            console.log('📬 Precios actualizados');
+                            setPrecios(doc.data());
+                        }
+                    }, (error) => {
+                        console.error('Error en listener de precios:', error);
+                    })
+                );
+                
+                // Listener: Horarios
+                unsubscribers.push(
+                    db.collection('config').doc('horarios').onSnapshot((doc) => {
+                        if (doc.exists) {
+                            console.log('📬 Horarios actualizados');
+                            setHorarios(doc.data());
+                        }
+                    }, (error) => {
+                        console.error('Error en listener de horarios:', error);
+                    })
+                );
+                
+                // Listener: CancelacionesAlumno
+                unsubscribers.push(
+                    db.collection('cancelacionesAlumno').onSnapshot((snapshot) => {
+                        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        console.log('📬 CancelacionesAlumno actualizadas:', data.length);
+                        setCancelacionesAlumno(data);
+                    }, (error) => {
+                        console.error('Error en listener de cancelacionesAlumno:', error);
+                    })
+                );
+                
+                // Listener: Cancelaciones
+                unsubscribers.push(
+                    db.collection('cancelaciones').onSnapshot((snapshot) => {
+                        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        setCancelaciones(data);
+                    }, (error) => {
+                        console.error('Error en listener de cancelaciones:', error);
+                    })
+                );
+                
+                // Cleanup: desuscribir todos los listeners
+                return () => {
+                    console.log('🔌 Limpiando todos los listeners');
+                    unsubscribers.forEach(unsub => unsub());
+                };
+            }, [authUser]);
+            
+            // PASO 3: Cuando authUser cambia y tenemos alumnos, resolver vista
+            useEffect(() => {
+                if (!authUser || alumnos.length === 0) return;
+                
+                const email = authUser.email;
+                let tipo = 'alumno';
+                if (email === 'marinapilatesestudio@gmail.com') {
+                    tipo = 'admin';
+                }
+                setUserType(tipo);
+                
+                if (tipo === 'alumno') {
+                    const alumno = alumnos.find(a => a.email === email);
+                    if (alumno) {
+                        setUsuarioActual(alumno);
+                        setVista('dashboard');
+                    }
+                } else {
+                    setVista('dashboard');
+                }
+            }, [authUser, alumnos]);
             
             // Actualizar usuarioActual cuando cambian los alumnos
             useEffect(() => {
-                console.log('🔄 useEffect detectó cambio en alumnos');
-                console.log('userType:', userType);
-                console.log('usuarioActual:', usuarioActual);
-                console.log('alumnos:', alumnos);
-                
                 if (userType === 'alumno' && usuarioActual) {
                     const alumnoActualizado = alumnos.find(a => a.email === usuarioActual.email);
-                    console.log('Alumno encontrado:', alumnoActualizado);
-                    
                     if (alumnoActualizado) {
-                        console.log('✅ Actualizando usuarioActual con:', alumnoActualizado);
                         setUsuarioActual(alumnoActualizado);
-                    } else {
-                        console.log('❌ No se encontró el alumno con email:', usuarioActual.email);
                     }
                 }
             }, [alumnos]);
             
-            // LISTENER EN TIEMPO REAL: Monitorear cambios del alumno logueado
-            useEffect(() => {
-                if (!usuarioActual?.email || userType !== 'alumno') return;
-                
-                const email = usuarioActual.email;
-                console.log('📡 Agregando listener en tiempo real para:', email);
-                
-                // Listener a la colección de alumnos filtrando por email
-                const unsubscribe = db.collection('alumnos')
-                    .where('email', '==', email)
-                    .onSnapshot((snapshot) => {
-                        snapshot.forEach((doc) => {
-                            const alumnoActualizado = { id: doc.id, ...doc.data() };
-                            console.log('📬 Cambio detectado en alumno:', alumnoActualizado);
-                            setUsuarioActual(alumnoActualizado);
-                        });
-                    }, (error) => {
-                        console.error('Error en listener del alumno:', error);
-                    });
-                
-                return () => {
-                    console.log('🔌 Limpiando listener del alumno');
-                    unsubscribe();
-                };
-            }, [usuarioActual?.email, userType]);
-            
             const cargarDatos = async () => {
                 try {
-                    // NO mostrar spinner - cargar en background
-                    
-                    // Solo inicializar la primera vez (cuando alumnos está vacío)
-                    if (alumnos.length === 0) {
-                        await FirebaseService.inicializarDatos();
-                    }
-                    
-                    // Cargar alumnos solo la primera vez (el listener los mantendrá sincronizados después)
-                    let alumnosData = alumnos;
-                    if (alumnos.length === 0) {
-                        alumnosData = await FirebaseService.obtenerAlumnos();
-                        setAlumnos(alumnosData);
-                    }
-                    
                     const [horariosData, preciosData, cancelacionesData, solicitudesData, recuperosData] = await Promise.all([
                         FirebaseService.obtenerHorarios(),
                         FirebaseService.obtenerPrecios(),
@@ -1340,9 +1273,6 @@
                     setCancelaciones(cancelacionesData);
                     setSolicitudes(solicitudesData);
                     setRecuperos(recuperosData);
-                    
-                    // Las cancelaciones de alumno se cargan solo cuando el alumno se logea
-                    // No las carguemos al inicio
                 } catch (error) {
                     console.error('Error al cargar datos:', error);
                 }
@@ -1351,8 +1281,9 @@
             const handleLogin = async (tipo, email) => {
                 setUserType(tipo);
                 if (tipo === 'alumno') {
+                    // Intentar encontrar el alumno (puede que los datos aún no estén cargados)
                     const alumno = alumnos.find(a => a.email === email);
-                    setUsuarioActual(alumno);
+                    if (alumno) setUsuarioActual(alumno);
                 }
                 setVista('dashboard');
             };
@@ -1362,14 +1293,28 @@
                     <div className="container">
                         <div className="loading">
                             <LogoSVG width={200} style={{margin: '0 auto'}} />
+                            <p>Cargando...</p>
                             <div className="spinner"></div>
                         </div>
                     </div>
                 );
             }
             
-            if (vista === 'login') {
+            if (vista === 'login' && !authUser) {
                 return <LoginScreen onLogin={handleLogin} alumnos={alumnos} />;
+            }
+            
+            // Si hay authUser pero vista es login y aún no tenemos datos, mostrar carga
+            if (vista === 'login' && authUser) {
+                return (
+                    <div className="container">
+                        <div className="loading">
+                            <LogoSVG width={200} style={{margin: '0 auto'}} />
+                            <p>Cargando datos...</p>
+                            <div className="spinner"></div>
+                        </div>
+                    </div>
+                );
             }
             
             if (userType === 'admin') {
@@ -1397,6 +1342,17 @@
             }
             
             if (userType === 'alumno') {
+                if (!usuarioActual) {
+                    return (
+                        <div className="container">
+                            <div className="loading">
+                                <LogoSVG width={200} style={{margin: '0 auto'}} />
+                                <p>Cargando tu información...</p>
+                                <div className="spinner"></div>
+                            </div>
+                        </div>
+                    );
+                }
                 return <AlumnoDashboard 
                     alumno={usuarioActual}
                     alumnos={alumnos}
@@ -1478,17 +1434,24 @@
                     return;
                 }
                 
-                // ✅ VALIDACIÓN: Verificar que el email esté en la lista de alumnos
-                const alumnoExiste = alumnos.find(a => a.email === email);
-                if (!alumnoExiste) {
-                    setError('❌ Este email no está registrado como alumno. Por favor, contactá a Marina Pilates.');
-                    return;
-                }
-                
                 setCargando(true);
                 try {
-                    // Crear usuario con la contraseña proporcionada
-                    await firebase.auth().createUserWithEmailAndPassword(email, nuevaPassword);
+                    // 1. Crear usuario en Firebase Auth (esto nos autentica automáticamente)
+                    const resultado = await firebase.auth().createUserWithEmailAndPassword(email, nuevaPassword);
+                    
+                    // 2. Ahora que estamos autenticados, verificar que el email esté registrado como alumno
+                    const snapshot = await db.collection('alumnos').where('email', '==', email).get();
+                    
+                    if (snapshot.empty) {
+                        // No es alumno registrado → borrar el usuario recién creado y desloguearse
+                        await resultado.user.delete();
+                        setError('❌ Este email no está registrado como alumno. Por favor, contactá a Marina Pilates.');
+                        setCargando(false);
+                        return;
+                    }
+                    
+                    // 3. Todo OK → cerrar sesión para que entre por el login normal
+                    await firebase.auth().signOut();
                     setError('');
                     setVista('login');
                     setEmail('');
@@ -1499,7 +1462,9 @@
                 } catch (error) {
                     console.error('Error al crear contraseña:', error);
                     if (error.code === 'auth/email-already-in-use') {
-                        setError('Este email ya tiene una contraseña asociada');
+                        setError('Este email ya tiene una contraseña asociada. Si no la recordás, usá "Olvidé mi contraseña".');
+                    } else if (error.code === 'auth/invalid-email') {
+                        setError('El email ingresado no es válido.');
                     } else {
                         setError('Error: ' + error.message);
                     }
