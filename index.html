@@ -1097,24 +1097,6 @@
                     clasesPendientes: 0,
                     clasesUsadas: 0
                 });
-            },
-            
-            async resetearAlumno(alumnoId) {
-                const batch = db.batch();
-                
-                // Borrar cancelacionesAlumno del alumno
-                const cancelaciones = await db.collection('cancelacionesAlumno').where('alumnoId', '==', alumnoId).get();
-                cancelaciones.docs.forEach(doc => batch.delete(doc.ref));
-                
-                // Borrar recuperos del alumno
-                const recuperos = await db.collection('recuperos').where('alumnoId', '==', alumnoId).get();
-                recuperos.docs.forEach(doc => batch.delete(doc.ref));
-                
-                // Borrar solicitudes del alumno
-                const solicitudes = await db.collection('solicitudes').where('alumnoId', '==', alumnoId).get();
-                solicitudes.docs.forEach(doc => batch.delete(doc.ref));
-                
-                await batch.commit();
             }
         };
         
@@ -1215,6 +1197,47 @@
                 
                 return () => {
                     console.log('🔌 Limpiando listener de precios');
+                    unsubscribe();
+                };
+            }, []);
+            
+            // LISTENER EN TIEMPO REAL: Horarios
+            useEffect(() => {
+                console.log('📡 Agregando listener en tiempo real para horarios');
+                
+                const unsubscribe = db.collection('config').doc('horarios').onSnapshot((doc) => {
+                    if (doc.exists) {
+                        const horariosActualizados = doc.data();
+                        console.log('📬 Horarios actualizados desde Firestore:', horariosActualizados);
+                        setHorarios(horariosActualizados);
+                    }
+                }, (error) => {
+                    console.error('Error en listener de horarios:', error);
+                });
+                
+                return () => {
+                    console.log('🔌 Limpiando listener de horarios');
+                    unsubscribe();
+                };
+            }, []);
+            
+            // LISTENER EN TIEMPO REAL: CancelacionesAlumno (todas, para admin)
+            useEffect(() => {
+                console.log('📡 Agregando listener en tiempo real para cancelacionesAlumno');
+                
+                const unsubscribe = db.collection('cancelacionesAlumno').onSnapshot((snapshot) => {
+                    const cancelacionesActualizadas = snapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data()
+                    }));
+                    console.log('📬 CancelacionesAlumno actualizadas desde Firestore:', cancelacionesActualizadas);
+                    setCancelacionesAlumno(cancelacionesActualizadas);
+                }, (error) => {
+                    console.error('Error en listener de cancelacionesAlumno:', error);
+                });
+                
+                return () => {
+                    console.log('🔌 Limpiando listener de cancelacionesAlumno');
                     unsubscribe();
                 };
             }, []);
@@ -1772,9 +1795,8 @@
                             right: 0,
                             bottom: 0,
                             background: 'rgba(0,0,0,0.5)',
-                            zIndex: 999,
-                            onClick: () => setMenuAbierto(false)
-                        }}>
+                            zIndex: 999
+                        }} onClick={() => setMenuAbierto(false)}>
                             <div style={{
                                 position: 'fixed',
                                 top: 0,
