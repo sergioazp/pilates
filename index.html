@@ -503,7 +503,7 @@
         
         // Configuración de Firebase
         const firebaseConfig = {
-            apiKey: "AIzaSyDJDMsiLBABUdPMNaRyfJ-s2MTwse-kX1w",
+            apiKey: "AIzaSyCDLWLdn_LRgeocmWCE0hTl7XbJNLAMx7A",
             authDomain: "marina-pilates-730fb.firebaseapp.com",
             projectId: "marina-pilates-730fb",
             storageBucket: "marina-pilates-730fb.firebasestorage.app",
@@ -1228,8 +1228,9 @@
             }, [authUser]);
             
             // PASO 3: Cuando authUser cambia y tenemos alumnos, resolver vista
+            // PASO 3: Resolver vista según usuario autenticado
             useEffect(() => {
-                if (!authUser || alumnos.length === 0) return;
+                if (!authUser) return;
                 
                 const email = authUser.email;
                 let tipo = 'alumno';
@@ -1238,14 +1239,16 @@
                 }
                 setUserType(tipo);
                 
-                if (tipo === 'alumno') {
+                if (tipo === 'admin') {
+                    // Admin no necesita esperar a que carguen alumnos
+                    setVista('dashboard');
+                } else if (alumnos.length > 0) {
+                    // Alumno: esperar a que carguen los datos para encontrar su perfil
                     const alumno = alumnos.find(a => a.email === email);
                     if (alumno) {
                         setUsuarioActual(alumno);
                         setVista('dashboard');
                     }
-                } else {
-                    setVista('dashboard');
                 }
             }, [authUser, alumnos]);
             
