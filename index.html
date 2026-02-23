@@ -503,7 +503,7 @@
         
         // Configuración de Firebase
         const firebaseConfig = {
-            apiKey: "AIzaSyDJDMsiLBABUdPMNaRyfJ-s2MTwse-kX1w",
+            apiKey: "AIzaSyCDLWLdn_LRgeocmWCE0hTl7XbJNLAMx7A",
             authDomain: "marina-pilates-730fb.firebaseapp.com",
             projectId: "marina-pilates-730fb",
             storageBucket: "marina-pilates-730fb.firebasestorage.app",
@@ -1379,14 +1379,12 @@
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
             const [error, setError] = useState('');
+            const [exito, setExito] = useState('');
             const [cargando, setCargando] = useState(false);
-            const [vista, setVista] = useState('login'); // 'login', 'resetPassword', 'generarPassword'
+            const [vista, setVista] = useState('login'); // 'login', 'resetPassword', 'activarCuenta'
             const [resetEmail, setResetEmail] = useState('');
-            const [nuevaPassword, setNuevaPassword] = useState('');
-            const [confirmarPassword, setConfirmarPassword] = useState('');
+            const [activarEmail, setActivarEmail] = useState('');
             const [mostrarPassword, setMostrarPassword] = useState(false);
-            const [mostrarNuevaPassword, setMostrarNuevaPassword] = useState(false);
-            const [mostrarConfirmarPassword, setMostrarConfirmarPassword] = useState(false);
             
             const handleLogin = async (e) => {
                 e.preventDefault();
@@ -1394,21 +1392,35 @@
                 setCargando(true);
                 
                 try {
-                    // Intentar autenticarse con Firebase
                     const resultado = await firebase.auth().signInWithEmailAndPassword(email, password);
                     const usuarioFirebase = resultado.user;
                     
-                    // Determinar si es admin o alumno
                     let userType = 'alumno';
                     if (email === 'marinapilatesestudio@gmail.com') {
                         userType = 'admin';
+                    }
+                    
+                    // Si es alumno, marcar como activo en el primer login
+                    if (userType === 'alumno') {
+                        try {
+                            const alumnoSnap = await db.collection('alumnos').where('email', '==', email).get();
+                            if (!alumnoSnap.empty) {
+                                const alumnoDoc = alumnoSnap.docs[0];
+                                if (!alumnoDoc.data().activo) {
+                                    await alumnoDoc.ref.update({ activo: true });
+                                    console.log('✅ Alumno marcado como activo en primer login');
+                                }
+                            }
+                        } catch (err) {
+                            console.error('Error al marcar activo:', err);
+                        }
                     }
                     
                     onLogin(userType, email);
                 } catch (error) {
                     console.error('Error en login:', error.code, error.message);
                     if (error.code === 'auth/user-not-found') {
-                        setError('Email no registrado');
+                        setError('Email no registrado. Si es tu primer ingreso, activá tu cuenta primero.');
                     } else if (error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
                         setError('Contraseña incorrecta');
                     } else if (error.code === 'auth/invalid-email') {
@@ -1420,53 +1432,54 @@
                 setCargando(false);
             };
             
-            const handleGenerarPassword = async (e) => {
+            const handleActivarCuenta = async (e) => {
                 e.preventDefault();
                 setError('');
-                
-                if (nuevaPassword !== confirmarPassword) {
-                    setError('Las contraseñas no coinciden');
-                    return;
-                }
-                
-                if (nuevaPassword.length < 6) {
-                    setError('La contraseña debe tener al menos 6 caracteres');
-                    return;
-                }
-                
+                setExito('');
                 setCargando(true);
+                
+                const emailNormalizado = activarEmail.trim().toLowerCase();
+                
                 try {
-                    // 1. Crear usuario en Firebase Auth (esto nos autentica automáticamente)
-                    const resultado = await firebase.auth().createUserWithEmailAndPassword(email, nuevaPassword);
+                    // 1. Verificar que el email esté en alumnos_autorizados (colección pública de solo lectura)
+                    const autorizadoSnap = await db.collection('alumnos_autorizados').where('email', '==', emailNormalizado).get();
                     
-                    // 2. Ahora que estamos autenticados, verificar que el email esté registrado como alumno
-                    const snapshot = await db.collection('alumnos').where('email', '==', email).get();
-                    
-                    if (snapshot.empty) {
-                        // No es alumno registrado → borrar el usuario recién creado y desloguearse
-                        await resultado.user.delete();
-                        setError('❌ Este email no está registrado como alumno. Por favor, contactá a Marina Pilates.');
+                    if (autorizadoSnap.empty) {
+                        setError('❌ Este email no está autorizado. Contactá a Marina Pilates para que te registre.');
                         setCargando(false);
                         return;
                     }
                     
-                    // 3. Todo OK → cerrar sesión para que entre por el login normal
+                    // 2. Crear usuario temporal en Firebase Auth con contraseña random
+                    const passwordTemporal = crypto.randomUUID() + 'Aa1!';
+                    let userCredential;
+                    try {
+                        userCredential = await firebase.auth().createUserWithEmailAndPassword(emailNormalizado, passwordTemporal);
+                    } catch (createError) {
+                        if (createError.code === 'auth/email-already-in-use') {
+                            // El usuario ya existe en Auth, enviar reset directamente
+                            await firebase.auth().sendPasswordResetEmail(emailNormalizado);
+                            setExito('📧 Ya tenés una cuenta creada. Te reenviamos el email para que definas tu contraseña. Revisá tu bandeja de entrada y spam.');
+                            setCargando(false);
+                            return;
+                        }
+                        throw createError;
+                    }
+                    
+                    // 3. Enviar email de reseteo de contraseña
+                    await firebase.auth().sendPasswordResetEmail(emailNormalizado);
+                    
+                    // 4. Cerrar la sesión temporal
                     await firebase.auth().signOut();
-                    setError('');
-                    setVista('login');
-                    setEmail('');
-                    setPassword('');
-                    setNuevaPassword('');
-                    setConfirmarPassword('');
-                    alert('✅ Contraseña creada exitosamente. Ya podés ingresar con tu mail y contraseña.');
+                    
+                    setExito('📧 ¡Listo! Te enviamos un email a ' + emailNormalizado + ' para que definas tu contraseña. Revisá tu bandeja de entrada y la carpeta de spam.');
+                    
                 } catch (error) {
-                    console.error('Error al crear contraseña:', error);
-                    if (error.code === 'auth/email-already-in-use') {
-                        setError('Este email ya tiene una contraseña asociada. Si no la recordás, usá "Olvidé mi contraseña".');
-                    } else if (error.code === 'auth/invalid-email') {
+                    console.error('Error al activar cuenta:', error);
+                    if (error.code === 'auth/invalid-email') {
                         setError('El email ingresado no es válido.');
                     } else {
-                        setError('Error: ' + error.message);
+                        setError('Error al activar la cuenta. Intentá de nuevo o contactá a Marina Pilates.');
                     }
                 }
                 setCargando(false);
@@ -1475,17 +1488,16 @@
             const handleResetPassword = async (e) => {
                 e.preventDefault();
                 setError('');
+                setExito('');
                 setCargando(true);
                 
                 try {
-                    await firebase.auth().sendPasswordResetEmail(resetEmail);
-                    alert('✅ Email de recuperación enviado. Revisá tu bandeja de entrada o la carpeta de spam.');
-                    setVista('login');
-                    setResetEmail('');
+                    await firebase.auth().sendPasswordResetEmail(resetEmail.trim().toLowerCase());
+                    setExito('📧 Email de recuperación enviado. Revisá tu bandeja de entrada o la carpeta de spam.');
                 } catch (error) {
                     console.error('Error al resetear:', error);
                     if (error.code === 'auth/user-not-found') {
-                        setError('Email no encontrado');
+                        setError('Este email no tiene cuenta activa. ¿Necesitás activar tu cuenta?');
                     } else {
                         setError('Error: ' + error.message);
                     }
@@ -1493,6 +1505,7 @@
                 setCargando(false);
             };
             
+            // ── Vista: Recuperar Contraseña ──
             if (vista === 'resetPassword') {
                 return (
                     <div style={{maxWidth: '400px', margin: '50px auto', background: 'white', padding: '40px', borderRadius: '12px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)'}}>
@@ -1507,26 +1520,29 @@
                         </h2>
                         
                         {error && <div className="alert alert-danger">{error}</div>}
+                        {exito && <div className="alert alert-success">{exito}</div>}
                         
-                        <form onSubmit={handleResetPassword}>
-                            <div className="form-group">
-                                <label>Email</label>
-                                <input 
-                                    type="email"
-                                    value={resetEmail}
-                                    onChange={(e) => setResetEmail(e.target.value)}
-                                    placeholder="tu@email.com"
-                                    required
-                                />
-                            </div>
-                            
-                            <button type="submit" className="btn btn-primary" style={{width: '100%'}} disabled={cargando}>
-                                {cargando ? '⏳ Enviando...' : 'Enviar Link de Recuperación'}
-                            </button>
-                        </form>
+                        {!exito && (
+                            <form onSubmit={handleResetPassword}>
+                                <div className="form-group">
+                                    <label>Email</label>
+                                    <input 
+                                        type="email"
+                                        value={resetEmail}
+                                        onChange={(e) => setResetEmail(e.target.value)}
+                                        placeholder="tu@email.com"
+                                        required
+                                    />
+                                </div>
+                                
+                                <button type="submit" className="btn btn-primary" style={{width: '100%'}} disabled={cargando}>
+                                    {cargando ? '⏳ Enviando...' : 'Enviar Link de Recuperación'}
+                                </button>
+                            </form>
+                        )}
                         
                         <button 
-                            onClick={() => setVista('login')} 
+                            onClick={() => { setVista('login'); setError(''); setExito(''); setResetEmail(''); }}
                             className="btn btn-secondary" 
                             style={{width: '100%', marginTop: '10px'}}
                         >
@@ -1536,7 +1552,8 @@
                 );
             }
             
-            if (vista === 'generarPassword') {
+            // ── Vista: Activar Cuenta ──
+            if (vista === 'activarCuenta') {
                 return (
                     <div style={{maxWidth: '400px', margin: '50px auto', background: 'white', padding: '40px', borderRadius: '12px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)'}}>
                         <div style={{textAlign: 'center', marginBottom: '20px'}}>
@@ -1545,90 +1562,52 @@
                                 <text x="50" y="65" fontSize="50" fontWeight="bold" textAnchor="middle" fill="#667eea" fontFamily="Arial">M</text>
                             </svg>
                         </div>
-                        <h2 style={{textAlign: 'center', marginBottom: '30px', color: '#667eea'}}>
-                            Crear Contraseña
+                        <h2 style={{textAlign: 'center', marginBottom: '20px', color: '#667eea'}}>
+                            Activar mi Cuenta
                         </h2>
                         
-                        <p style={{textAlign: 'center', color: '#6c757d', marginBottom: '20px'}}>
-                            Email: <strong>{email}</strong>
-                        </p>
+                        <div style={{marginBottom: '20px', padding: '12px', background: '#d1ecf1', borderRadius: '8px', fontSize: '0.85rem', color: '#0c5460', lineHeight: '1.5'}}>
+                            Ingresá el email con el que te registró la profesora. Te enviaremos un link para que definas tu contraseña.
+                        </div>
                         
                         {error && <div className="alert alert-danger">{error}</div>}
+                        {exito && <div className="alert alert-success">{exito}</div>}
                         
-                        <form onSubmit={handleGenerarPassword}>
-                            <div className="form-group">
-                                <label>Nueva Contraseña</label>
-                                <div className="password-wrapper">
+                        {!exito && (
+                            <form onSubmit={handleActivarCuenta}>
+                                <div className="form-group">
+                                    <label>Email</label>
                                     <input 
-                                        type={mostrarNuevaPassword ? "text" : "password"}
-                                        value={nuevaPassword}
-                                        onChange={(e) => setNuevaPassword(e.target.value)}
-                                        placeholder="••••••••"
+                                        type="email"
+                                        value={activarEmail}
+                                        onChange={(e) => setActivarEmail(e.target.value)}
+                                        placeholder="tu@email.com"
                                         required
                                     />
-                                    <button 
-                                        type="button"
-                                        className="password-toggle"
-                                        onClick={() => setMostrarNuevaPassword(!mostrarNuevaPassword)}
-                                        tabIndex={-1}
-                                    >
-                                        {mostrarNuevaPassword ? (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>) : (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>)}
-                                    </button>
                                 </div>
-                            </div>
-                            
-                            <div className="form-group">
-                                <label>Confirmar Contraseña</label>
-                                <div className="password-wrapper">
-                                    <input 
-                                        type={mostrarConfirmarPassword ? "text" : "password"}
-                                        value={confirmarPassword}
-                                        onChange={(e) => setConfirmarPassword(e.target.value)}
-                                        placeholder="••••••••"
-                                        required
-                                    />
-                                    <button 
-                                        type="button"
-                                        className="password-toggle"
-                                        onClick={() => setMostrarConfirmarPassword(!mostrarConfirmarPassword)}
-                                        tabIndex={-1}
-                                    >
-                                        {mostrarConfirmarPassword ? (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>) : (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>)}
-                                    </button>
-                                </div>
-                            </div>
-                            
-                            <button type="submit" className="btn btn-primary" style={{width: '100%'}} disabled={cargando}>
-                                {cargando ? '⏳ Creando...' : 'Crear Contraseña'}
-                            </button>
-                        </form>
+                                
+                                <button type="submit" className="btn btn-primary" style={{width: '100%'}} disabled={cargando}>
+                                    {cargando ? '⏳ Verificando...' : 'Activar Cuenta'}
+                                </button>
+                            </form>
+                        )}
                         
                         <button 
-                            onClick={() => {
-                                setVista('login');
-                                setEmail('');
-                                setNuevaPassword('');
-                                setConfirmarPassword('');
-                                setError('');
-                            }} 
+                            onClick={() => { setVista('login'); setError(''); setExito(''); setActivarEmail(''); }}
                             className="btn btn-secondary" 
                             style={{width: '100%', marginTop: '10px'}}
                         >
-                            Cancelar
+                            Volver al Login
                         </button>
                     </div>
                 );
             }
             
-            // Vista de login principal
+            // ── Vista: Login principal ──
             return (
                 <div style={{maxWidth: '400px', margin: '50px auto', background: 'white', padding: '40px', borderRadius: '12px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)'}}>
                     <div style={{textAlign: 'center', marginBottom: '30px'}}>
                         <LogoSVG width={200} style={{margin: '0 auto'}} />
-                    </div>
-                    
-                    <div style={{marginBottom: '20px', padding: '10px', background: '#d1ecf1', borderRadius: '8px', fontSize: '0.9rem', color: '#0c5460'}}>
-                        ✅ Conexión establecida
                     </div>
                     
                     {error && <div className="alert alert-danger">{error}</div>}
@@ -1673,16 +1652,23 @@
                     
                     <div style={{marginTop: '20px', textAlign: 'center'}}>
                         <button 
-                            onClick={() => setVista('resetPassword')}
+                            onClick={() => { setVista('resetPassword'); setError(''); }}
                             style={{background: 'none', border: 'none', color: '#667eea', cursor: 'pointer', textDecoration: 'underline', fontSize: '0.9rem'}}
                         >
                             ¿Olvidaste tu contraseña?
                         </button>
                     </div>
                     
-                    <div style={{marginTop: '20px', padding: '15px', background: '#f0f7ff', borderRadius: '8px', fontSize: '0.85rem', color: '#0c5060'}}>
+                    <div style={{marginTop: '20px', padding: '15px', background: '#f0f7ff', borderRadius: '8px', fontSize: '0.85rem', color: '#0c5060', textAlign: 'center'}}>
                         <strong>¿Primer ingreso?</strong><br/>
-                        Si no tenés contraseña aún, podés crearla ahora. Usá tu mail y crea una contraseña de al menos 6 caracteres.
+                        <span style={{display: 'block', marginTop: '6px', marginBottom: '10px'}}>Si la profesora ya te registró, activá tu cuenta para recibir un email y crear tu contraseña.</span>
+                        <button 
+                            onClick={() => { setVista('activarCuenta'); setError(''); }}
+                            className="btn btn-success"
+                            style={{fontSize: '0.9rem', padding: '10px 20px'}}
+                        >
+                            Activar mi Cuenta
+                        </button>
                     </div>
                 </div>
             );
