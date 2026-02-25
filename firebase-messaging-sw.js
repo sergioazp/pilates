@@ -1,8 +1,6 @@
 // ============================================================
 //  firebase-messaging-sw.js
 //  Service Worker para notificaciones push de Marina Pilates
-//  Subir este archivo a la RAÍZ de tu repositorio GitHub
-//  (al lado del index.html)
 // ============================================================
 
 importScripts('https://www.gstatic.com/firebasejs/10.10.0/firebase-app-compat.js');
@@ -17,17 +15,10 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// Este handler se dispara cuando llega una notificación con la app CERRADA
+// Dejamos esto solo para ver en la consola que llegó, 
+// pero ELIMINAMOS el "showNotification" para evitar el duplicado.
 messaging.onBackgroundMessage((payload) => {
-    console.log('[SW] Notificación en background:', payload);
-    const { title, body } = payload.notification || {};
-    self.registration.showNotification(title || 'Marina Pilates', {
-        body: body || '',
-        icon: 'https://marina-pilates.github.io/icon-192.png', // opcional
-        badge: 'https://marina-pilates.github.io/icon-192.png',
-        tag: 'marina-pilates-notif', // evita duplicados
-        requireInteraction: true     // no desaparece sola en Android
-    });
+    console.log('[SW] Notificación recibida en background:', payload);
 });
 
 // Al hacer click en la notificación, abre la app
