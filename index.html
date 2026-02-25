@@ -3190,7 +3190,7 @@
                     await FirebaseService.guardarSolicitud(nuevaSolicitud);
                     
                     // Notificar al admin
-                    enviarNotificacionAdmin(
+                   // enviarNotificacionAdmin(
                         '🔄 Solicitud de recupero',
                         `${alumno.nombre} ${alumno.apellido} solicita recuperar el ${slot.dia} ${slot.fecha} a las ${slot.hora}`
                     );
@@ -3295,7 +3295,7 @@
                     await FirebaseService.guardarCancelacionAlumno(nuevaCancelacionAlumno);
                     
                     // Notificar al admin
-                    enviarNotificacionAdmin(
+                    //enviarNotificacionAdmin(
                         '❌ Cancelación de clase',
                         `${alumno.nombre} ${alumno.apellido} canceló su clase del ${fechaStr} a las ${hora}`
                     );
