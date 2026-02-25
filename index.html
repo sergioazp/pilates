@@ -535,20 +535,27 @@
         
         // Registra el Service Worker y guarda el token FCM del admin en Firestore
         const inicializarPushAdmin = async () => {
-            if (!messaging) {
-                console.warn('Push no configurado: falta inicializar messaging');
-                return;
-            }
+            if (!messaging) return;
             try {
+                // 1. Registramos el Service Worker
                 const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-                const permiso = await Notification.requestPermission();
-                if (permiso !== 'granted') {
-                    console.warn('Permiso de notificaciones denegado');
-                    return;
+                
+                // 2. ESPERAMOS a que el Service Worker esté activo
+                // Este es el truco para evitar el error "no active Service Worker"
+                while (!reg.active) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
                 }
-                const token = await messaging.getToken({ vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: reg });
+
+                const permiso = await Notification.requestPermission();
+                if (permiso !== 'granted') return;
+
+                // 3. Ahora que está activo, pedimos el token
+                const token = await messaging.getToken({ 
+                    vapidKey: FCM_VAPID_KEY, 
+                    serviceWorkerRegistration: reg 
+                });
+
                 if (token) {
-                    // Actualizamos la ruta para que coincida exactamente con la Cloud Function
                     await db.collection('configuracion').doc('notificaciones').set({ 
                         adminPushToken: token, 
                         updatedAt: new Date().toISOString() 
