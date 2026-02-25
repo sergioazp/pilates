@@ -518,13 +518,11 @@
         const db = firebase.firestore();
         const auth = firebase.auth();
         
-        // ============================================================
+      // ============================================================
         //  NOTIFICACIONES PUSH — FCM
-        //  PASO REQUERIDO: Reemplazá los dos valores de abajo con los
-        //  que obtenés en Firebase Console (instrucciones al final del archivo)
         // ============================================================
-        const FCM_VAPID_KEY   = 'REEMPLAZAR_CON_TU_VAPID_KEY';   // Web Push certificate key pair
-        const FCM_SERVER_KEY  = 'REEMPLAZAR_CON_TU_SERVER_KEY';   // Cloud Messaging > Server key (legacy)
+        const FCM_VAPID_KEY   = 'BHWFxkD8noIP18REPNIuz5tfwrxcS305XL-AMfONlx-NDOuNxRqjkBnZO0WWcyJeu1R021XRAFPm-U-OBtGslh0';   
+        // Eliminamos la FCM_SERVER_KEY porque ahora usamos Cloud Functions de forma segura.
         
         let messaging = null;
         try {
@@ -537,8 +535,8 @@
         
         // Registra el Service Worker y guarda el token FCM del admin en Firestore
         const inicializarPushAdmin = async () => {
-            if (!messaging || FCM_VAPID_KEY === 'REEMPLAZAR_CON_TU_VAPID_KEY') {
-                console.warn('Push no configurado: falta la VAPID key');
+            if (!messaging) {
+                console.warn('Push no configurado: falta inicializar messaging');
                 return;
             }
             try {
@@ -550,38 +548,19 @@
                 }
                 const token = await messaging.getToken({ vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: reg });
                 if (token) {
-                    await db.collection('config').doc('adminPushToken').set({ token, updatedAt: new Date().toISOString() });
-                    console.log('✅ Push activado para admin');
+                    // Actualizamos la ruta para que coincida exactamente con la Cloud Function
+                    await db.collection('configuracion').doc('notificaciones').set({ 
+                        adminPushToken: token, 
+                        updatedAt: new Date().toISOString() 
+                    }, { merge: true });
+                    console.log('✅ Push activado para admin y guardado correctamente');
                 }
             } catch(e) {
                 console.warn('Error al inicializar push:', e.message);
             }
         };
         
-        // Envía una notificación push al dispositivo admin
-        const enviarNotificacionAdmin = async (titulo, cuerpo) => {
-            if (FCM_SERVER_KEY === 'REEMPLAZAR_CON_TU_SERVER_KEY') return;
-            try {
-                const doc = await db.collection('config').doc('adminPushToken').get();
-                if (!doc.exists || !doc.data()?.token) return;
-                const adminToken = doc.data().token;
-                await fetch('https://fcm.googleapis.com/fcm/send', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'key=' + FCM_SERVER_KEY
-                    },
-                    body: JSON.stringify({
-                        to: adminToken,
-                        notification: { title: titulo, body: cuerpo },
-                        data: { url: '/' }
-                    })
-                });
-            } catch(e) {
-                console.warn('No se pudo enviar notificación push:', e.message);
-            }
-        };
-        
+               
         // Feriados de Argentina 2026 + opción para custom
         const FERIADOS_FIJOS = [
             '2026-01-01', // Año Nuevo
