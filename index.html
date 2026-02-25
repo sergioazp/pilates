@@ -3189,11 +3189,7 @@
                     
                     await FirebaseService.guardarSolicitud(nuevaSolicitud);
                     
-                    // Notificar al admin
-                   // enviarNotificacionAdmin(
-                        '🔄 Solicitud de recupero',
-                        `${alumno.nombre} ${alumno.apellido} solicita recuperar el ${slot.dia} ${slot.fecha} a las ${slot.hora}`
-                    );
+                    
                     // Los listeners se encargan de actualizar automáticamente
                     alert('✅ Solicitud enviada! La profesora te confirmará pronto.');
                 } catch (error) {
@@ -3294,12 +3290,7 @@
                     
                     await FirebaseService.guardarCancelacionAlumno(nuevaCancelacionAlumno);
                     
-                    // Notificar al admin
-                    //enviarNotificacionAdmin(
-                        '❌ Cancelación de clase',
-                        `${alumno.nombre} ${alumno.apellido} canceló su clase del ${fechaStr} a las ${hora}`
-                    );
-                    
+                                        
                     // Agregar a cancelacionesAlumno local
                     setCancelacionesAlumno([...cancelacionesAlumno, nuevaCancelacionAlumno]);
                     
