@@ -1938,6 +1938,11 @@
         
         function CalendarioAdminTab({ alumnos, cancelacionesAlumno, horarios, recuperos }) {
             const [semanaSeleccionada, setSemanaSeleccionada] = useState(new Date());
+            const [vistaMode, setVistaMode] = useState('semana'); // 'semana' | 'dia'
+            const [diaVista, setDiaVista] = useState(() => {
+                const hoy = new Date();
+                return hoy.getDay(); // 0=Dom..6=Sab, usaremos índice en diasSemana
+            });
             
             const obtenerNombreCorto = (alumno) => {
                 if (!alumno) return '';
@@ -1949,7 +1954,6 @@
                 const fechaStr = fechaLocal(fecha);
                 const diaSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][fecha.getDay()];
                 
-                // Alumnos con horario recurrente que no cancelaron
                 const regulares = alumnos.filter(alumno => {
                     if (!(alumno.horariosAsignados || []).includes(`${diaSemana}-${hora}`)) return false;
                     const estaCancelada = cancelacionesAlumno.some(c => 
@@ -1958,7 +1962,6 @@
                     return !estaCancelada;
                 });
                 
-                // Alumnos con recupero aprobado para esta fecha/hora
                 const conRecupero = (recuperos || [])
                     .filter(r => r.fecha === fechaStr && r.hora === hora && r.estado === 'aprobado')
                     .map(r => ({ id: r.alumnoId, nombre: r.alumnoNombre?.split(' ')[0] || '', apellido: r.alumnoNombre?.split(' ')[1] || '', esRecupero: true }));
@@ -1971,14 +1974,12 @@
                 return cancelacionesAlumno.filter(c => c.fecha === fechaStr && c.hora === hora);
             };
             
-            const obtenerDiasDeSemanConClases = () => {
+            const obtenerDiasDeSemana = () => {
                 const diasSemana = [];
                 const primerDia = new Date(semanaSeleccionada);
-                // Arrancar en lunes
                 const dia = primerDia.getDay();
                 const diffLunes = dia === 0 ? -6 : 1 - dia;
                 primerDia.setDate(primerDia.getDate() + diffLunes);
-                
                 for (let i = 0; i < 7; i++) {
                     const fecha = new Date(primerDia);
                     fecha.setDate(fecha.getDate() + i);
@@ -1987,120 +1988,221 @@
                 return diasSemana;
             };
             
-            const obtenerHorariosConClasesEnFecha = (fecha) => {
-                const diaSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][fecha.getDay()];
-                const horariosDelDia = [...new Set(
-                    alumnos
-                        .filter(a => (a.horariosAsignados || []).some(h => h.split('-')[0] === diaSemana))
-                        .flatMap(a => (a.horariosAsignados || []).filter(h => h.split('-')[0] === diaSemana).map(h => h.split('-')[1]))
-                )].sort();
-                return horariosDelDia;
-            };
-            
-            const diasSemana = obtenerDiasDeSemanConClases();
+            const diasSemana = obtenerDiasDeSemana();
             const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
             const diasSemanaAbrev = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+            const diasSemanaCompleto = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
             
-            // Obtener todos los horarios con clases en la semana (incluyendo recuperos)
-            const horariosEnSemana = [...new Set([
-                ...diasSemana.flatMap(fecha => obtenerHorariosConClasesEnFecha(fecha)),
-                ...(recuperos || [])
-                    .filter(r => r.estado === 'aprobado' && diasSemana.some(f => fechaLocal(f) === r.fecha))
-                    .map(r => r.hora)
-            ])].sort();
+            // Todos los horarios únicos configurados (de TODOS los días), ordenados
+            const todosLosHorarios = [...new Set(
+                Object.values(horarios).flat()
+            )].sort();
             
-            if (horariosEnSemana.length === 0) {
+            const CAPACIDAD_MAX = 5;
+            
+            const renderCelda = (fecha, hora, key) => {
+                const diaSemanaStr = diasSemanaCompleto[fecha.getDay()];
+                const tieneHorarioConfig = (horarios[diaSemanaStr] || []).includes(hora);
+                
+                if (!tieneHorarioConfig) {
+                    // Check recuperos
+                    const fechaStr = fechaLocal(fecha);
+                    const tieneRecupero = (recuperos || []).some(r => r.fecha === fechaStr && r.hora === hora && r.estado === 'aprobado');
+                    if (!tieneRecupero) {
+                        return <td key={key} style={{padding: '8px', border: '1px solid #e9ecef', background: '#fafafa'}}></td>;
+                    }
+                }
+                
+                const alumnosHoy = obtenerAlumnosEnHorario(fecha, hora);
+                const cancelacionesHoy = obtenerCancelacionesEnHorario(fecha, hora);
+                const ocupados = alumnosHoy.length;
+                const libres = CAPACIDAD_MAX - ocupados;
+                const esFeriado = FERIADOS_FIJOS.includes(fechaLocal(fecha));
+                
+                const bgColor = esFeriado ? '#fff8e1' : alumnosHoy.length === 0 ? '#f8f9fa' : 'white';
+                const borderColor = libres <= 0 ? '#dc3545' : libres === 1 ? '#ffc107' : '#e9ecef';
+                
                 return (
-                    <div>
-                        <h2 style={{marginBottom: '20px'}}>Calendario - Semana de {diasSemana[0].getDate()} al {diasSemana[6].getDate()} de {meses[semanaSeleccionada.getMonth()]}</h2>
-                        <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '20px'}}>
-                            <button className="btn btn-secondary" onClick={() => setSemanaSeleccionada(new Date(semanaSeleccionada.getTime() - 7 * 24 * 60 * 60 * 1000))}>← Semana Anterior</button>
-                            <button className="btn btn-secondary" onClick={() => setSemanaSeleccionada(new Date())}>Hoy</button>
-                            <button className="btn btn-secondary" onClick={() => setSemanaSeleccionada(new Date(semanaSeleccionada.getTime() + 7 * 24 * 60 * 60 * 1000))}>Semana Siguiente →</button>
+                    <td key={key} style={{padding: '8px', border: `1px solid ${borderColor}`, verticalAlign: 'top', background: bgColor, minWidth: '110px'}}>
+                        <div style={{fontSize: '0.72rem', fontWeight: 'bold', marginBottom: '4px', 
+                            color: esFeriado ? '#856404' : libres <= 0 ? '#dc3545' : libres <= 1 ? '#fd7e14' : '#28a745'}}>
+                            {esFeriado ? '🗓 Feriado' : `${ocupados}/${CAPACIDAD_MAX} ${libres > 0 ? `· ${libres} libre${libres !== 1 ? 's' : ''}` : '· LLENO'}`}
                         </div>
-                        <div className="alert alert-info">No hay clases programadas esta semana.</div>
-                    </div>
+                        {alumnosHoy.length > 0 && (
+                            <div style={{marginBottom: '4px'}}>
+                                {alumnosHoy.map((alumno, idx) => (
+                                    <div key={idx} style={{fontSize: '0.7rem', padding: '2px 4px', background: alumno.esRecupero ? '#28a745' : '#667eea', color: 'white', borderRadius: '3px', marginBottom: '2px'}}>
+                                        {alumno.esRecupero ? '🔄 ' : ''}{obtenerNombreCorto(alumno)}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        {cancelacionesHoy.length > 0 && (
+                            <div>
+                                {cancelacionesHoy.map((c, idx) => (
+                                    <div key={idx} style={{fontSize: '0.7rem', padding: '2px 4px', background: '#e9ecef', color: '#888', borderRadius: '3px', marginBottom: '2px', textDecoration: 'line-through'}}>
+                                        {c.alumnoNombre}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        {alumnosHoy.length === 0 && cancelacionesHoy.length === 0 && !esFeriado && (
+                            <div style={{fontSize: '0.7rem', color: '#bbb', fontStyle: 'italic'}}>sin alumnos</div>
+                        )}
+                    </td>
                 );
-            }
+            };
             
             return (
                 <div>
-                    <h2 style={{marginBottom: '20px'}}>Calendario - Semana de {diasSemana[0].getDate()} al {diasSemana[6].getDate()} de {meses[semanaSeleccionada.getMonth()]}</h2>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px'}}>
+                        <h2 style={{margin: 0}}>
+                            Calendario — {vistaMode === 'dia' 
+                                ? `${diasSemanaCompleto[diasSemana[diaVista]?.getDay() ?? 1]} ${diasSemana[diaVista]?.getDate()} de ${meses[semanaSeleccionada.getMonth()]}`
+                                : `Semana del ${diasSemana[0].getDate()} al ${diasSemana[6].getDate()} de ${meses[semanaSeleccionada.getMonth()]}`
+                            }
+                        </h2>
+                        
+                        {/* Toggle semana / día */}
+                        <div style={{display: 'flex', border: '2px solid #e9ecef', borderRadius: '8px', overflow: 'hidden'}}>
+                            <button
+                                onClick={() => setVistaMode('semana')}
+                                style={{padding: '8px 16px', border: 'none', cursor: 'pointer', background: vistaMode === 'semana' ? '#667eea' : 'white', color: vistaMode === 'semana' ? 'white' : '#6c757d', fontWeight: 600, fontSize: '0.9rem'}}
+                            >📅 Semana</button>
+                            <button
+                                onClick={() => setVistaMode('dia')}
+                                style={{padding: '8px 16px', border: 'none', cursor: 'pointer', background: vistaMode === 'dia' ? '#667eea' : 'white', color: vistaMode === 'dia' ? 'white' : '#6c757d', fontWeight: 600, fontSize: '0.9rem'}}
+                            >📆 Día</button>
+                        </div>
+                    </div>
                     
-                    <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '20px'}}>
-                        <button className="btn btn-secondary" onClick={() => setSemanaSeleccionada(new Date(semanaSeleccionada.getTime() - 7 * 24 * 60 * 60 * 1000))}>
+                    {/* Navegación semana */}
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '8px', flexWrap: 'wrap'}}>
+                        <button className="btn btn-secondary" style={{padding: '8px 16px'}} onClick={() => setSemanaSeleccionada(new Date(semanaSeleccionada.getTime() - 7 * 24 * 60 * 60 * 1000))}>
                             ← Semana Anterior
                         </button>
-                        <button className="btn btn-secondary" onClick={() => setSemanaSeleccionada(new Date())}>
-                            Hoy
-                        </button>
-                        <button className="btn btn-secondary" onClick={() => setSemanaSeleccionada(new Date(semanaSeleccionada.getTime() + 7 * 24 * 60 * 60 * 1000))}>
-                            Semana Siguiente →
-                        </button>
+                        
+                        {/* Selector de día (solo en vista día) */}
+                        {vistaMode === 'dia' && (
+                            <div style={{display: 'flex', gap: '4px', flexWrap: 'wrap', justifyContent: 'center'}}>
+                                {diasSemana.map((fecha, i) => {
+                                    const diaNombre = diasSemanaAbrev[fecha.getDay()];
+                                    const tieneClases = Object.keys(horarios).some(d => diasSemanaCompleto[fecha.getDay()] === d && (horarios[d]||[]).length > 0);
+                                    return (
+                                        <button key={i} onClick={() => setDiaVista(i)}
+                                            style={{padding: '6px 10px', borderRadius: '8px', border: `2px solid ${diaVista === i ? '#667eea' : '#dee2e6'}`,
+                                                background: diaVista === i ? '#667eea' : 'white', color: diaVista === i ? 'white' : tieneClases ? '#333' : '#bbb',
+                                                cursor: 'pointer', fontWeight: diaVista === i ? 700 : 400, fontSize: '0.85rem'}}>
+                                            {diaNombre} {fecha.getDate()}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
+                        
+                        <div style={{display: 'flex', gap: '8px'}}>
+                            <button className="btn btn-secondary" style={{padding: '8px 16px'}} onClick={() => setSemanaSeleccionada(new Date())}>Hoy</button>
+                            <button className="btn btn-secondary" style={{padding: '8px 16px'}} onClick={() => setSemanaSeleccionada(new Date(semanaSeleccionada.getTime() + 7 * 24 * 60 * 60 * 1000))}>
+                                Semana Siguiente →
+                            </button>
+                        </div>
                     </div>
                     
-                    <div className="table-responsive">
-                        <table style={{width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem'}}>
-                            <thead>
-                                <tr style={{background: '#667eea', color: 'white'}}>
-                                    <th style={{padding: '10px', border: '1px solid #dee2e6', textAlign: 'left'}}>Hora</th>
-                                    {diasSemana.map((fecha, i) => (
-                                        <th key={i} style={{padding: '10px', border: '1px solid #dee2e6', textAlign: 'center', minWidth: '120px'}}>
-                                            {diasSemanaAbrev[fecha.getDay()]} {fecha.getDate()}
-                                        </th>
+                    {todosLosHorarios.length === 0 ? (
+                        <div className="alert alert-info">No hay horarios configurados. Configurá los horarios en la pestaña "Horarios".</div>
+                    ) : vistaMode === 'semana' ? (
+                        /* ===== VISTA SEMANAL ===== */
+                        <div className="table-responsive">
+                            <table style={{width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem'}}>
+                                <thead>
+                                    <tr style={{background: '#667eea', color: 'white'}}>
+                                        <th style={{padding: '10px', border: '1px solid #dee2e6', textAlign: 'left', minWidth: '60px'}}>Hora</th>
+                                        {diasSemana.map((fecha, i) => (
+                                            <th key={i} style={{padding: '10px', border: '1px solid #dee2e6', textAlign: 'center', minWidth: '110px'}}>
+                                                {diasSemanaAbrev[fecha.getDay()]} {fecha.getDate()}
+                                            </th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {todosLosHorarios.map(hora => (
+                                        <tr key={hora}>
+                                            <td style={{padding: '10px', border: '1px solid #dee2e6', fontWeight: 'bold', background: '#f8f9fa', whiteSpace: 'nowrap'}}>
+                                                {hora}
+                                            </td>
+                                            {diasSemana.map((fecha, i) => renderCelda(fecha, hora, i))}
+                                        </tr>
                                     ))}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {horariosEnSemana.map(hora => (
-                                    <tr key={hora}>
-                                        <td style={{padding: '10px', border: '1px solid #dee2e6', fontWeight: 'bold', background: '#f8f9fa'}}>
-                                            {hora}
-                                        </td>
-                                        {diasSemana.map((fecha, i) => {
-                                            const diaSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][fecha.getDay()];
-                                            const tieneHorarioEnDia = alumnos.some(a => (a.horariosAsignados || []).includes(`${diaSemana}-${hora}`)) ||
-                                                (recuperos || []).some(r => r.fecha === fechaLocal(fecha) && r.hora === hora && r.estado === 'aprobado');
-                                            
-                                            if (!tieneHorarioEnDia) {
-                                                return <td key={i} style={{padding: '10px', border: '1px solid #dee2e6', background: '#f5f5f5'}}></td>;
-                                            }
-                                            
-                                            const alumnosHoy = obtenerAlumnosEnHorario(fecha, hora);
-                                            const cancelacionesHoy = obtenerCancelacionesEnHorario(fecha, hora);
-                                            const ocupados = alumnosHoy.length;
-                                            const libres = 5 - ocupados;
-                                            
-                                            return (
-                                                <td key={i} style={{padding: '10px', border: '1px solid #dee2e6', verticalAlign: 'top', background: cancelacionesHoy.length > 0 ? '#f0f0f0' : 'white'}}>
-                                                    <div style={{fontSize: '0.75rem', fontWeight: 'bold', marginBottom: '5px', color: libres > 0 ? '#28a745' : '#dc3545'}}>
-                                                        {libres} lugar{libres !== 1 ? 'es' : ''}
-                                                    </div>
-                                                    <div style={{marginBottom: '5px'}}>
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        /* ===== VISTA DÍA ===== */
+                        (() => {
+                            const fechaDia = diasSemana[diaVista];
+                            const diaSemanaStr = diasSemanaCompleto[fechaDia.getDay()];
+                            const horariosDelDia = (horarios[diaSemanaStr] || []).slice().sort();
+                            // Include recuperos for that day
+                            const fechaStr = fechaLocal(fechaDia);
+                            const horasConRecupero = (recuperos || [])
+                                .filter(r => r.fecha === fechaStr && r.estado === 'aprobado')
+                                .map(r => r.hora);
+                            const todasLasHoras = [...new Set([...horariosDelDia, ...horasConRecupero])].sort();
+                            
+                            if (todasLasHoras.length === 0) {
+                                return <div className="alert alert-info">No hay clases configuradas para este día.</div>;
+                            }
+                            
+                            return (
+                                <div style={{display: 'flex', flexDirection: 'column', gap: '12px'}}>
+                                    {todasLasHoras.map(hora => {
+                                        const alumnosHoy = obtenerAlumnosEnHorario(fechaDia, hora);
+                                        const cancelacionesHoy = obtenerCancelacionesEnHorario(fechaDia, hora);
+                                        const ocupados = alumnosHoy.length;
+                                        const libres = CAPACIDAD_MAX - ocupados;
+                                        const esFeriado = FERIADOS_FIJOS.includes(fechaStr);
+                                        
+                                        return (
+                                            <div key={hora} style={{background: 'white', border: `2px solid ${libres <= 0 ? '#dc3545' : libres === 1 ? '#ffc107' : '#e9ecef'}`, borderRadius: '12px', padding: '16px'}}>
+                                                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px'}}>
+                                                    <span style={{fontSize: '1.4rem', fontWeight: 'bold', color: '#667eea'}}>{hora}</span>
+                                                    <span style={{fontWeight: 600, fontSize: '0.9rem', padding: '4px 12px', borderRadius: '20px',
+                                                        background: esFeriado ? '#fff3cd' : libres <= 0 ? '#f8d7da' : libres === 1 ? '#fff3cd' : '#d4edda',
+                                                        color: esFeriado ? '#856404' : libres <= 0 ? '#721c24' : libres === 1 ? '#856404' : '#155724'}}>
+                                                        {esFeriado ? '🗓 Feriado' : `${ocupados}/${CAPACIDAD_MAX} · ${libres > 0 ? `${libres} libre${libres !== 1 ? 's' : ''}` : 'LLENO'}`}
+                                                    </span>
+                                                </div>
+                                                {alumnosHoy.length > 0 && (
+                                                    <div style={{display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: cancelacionesHoy.length > 0 ? '10px' : 0}}>
                                                         {alumnosHoy.map((alumno, idx) => (
-                                                            <div key={idx} style={{fontSize: '0.7rem', padding: '2px', background: alumno.esRecupero ? '#28a745' : '#667eea', color: 'white', borderRadius: '3px', marginBottom: '2px'}}>
-                                                                {alumno.esRecupero ? '🔄 ' : ''}{obtenerNombreCorto(alumno)}
-                                                            </div>
+                                                            <span key={idx} style={{padding: '5px 12px', borderRadius: '20px', background: alumno.esRecupero ? '#28a745' : '#667eea', color: 'white', fontSize: '0.85rem', fontWeight: 600}}>
+                                                                {alumno.esRecupero ? '🔄 ' : ''}{alumno.nombre} {alumno.apellido}
+                                                            </span>
                                                         ))}
                                                     </div>
-                                                    {cancelacionesHoy.length > 0 && (
-                                                        <div>
-                                                            <div style={{fontSize: '0.7rem', fontWeight: 'bold', color: '#ff9800', marginBottom: '3px'}}>Canceladas:</div>
+                                                )}
+                                                {cancelacionesHoy.length > 0 && (
+                                                    <div>
+                                                        <div style={{fontSize: '0.8rem', color: '#999', marginBottom: '4px'}}>Cancelaron:</div>
+                                                        <div style={{display: 'flex', flexWrap: 'wrap', gap: '6px'}}>
                                                             {cancelacionesHoy.map((c, idx) => (
-                                                                <div key={idx} style={{fontSize: '0.7rem', padding: '2px', background: '#ccc', color: '#666', borderRadius: '3px', marginBottom: '2px', textDecoration: 'line-through'}}>
+                                                                <span key={idx} style={{padding: '4px 10px', borderRadius: '20px', background: '#e9ecef', color: '#888', fontSize: '0.85rem', textDecoration: 'line-through'}}>
                                                                     {c.alumnoNombre}
-                                                                </div>
+                                                                </span>
                                                             ))}
                                                         </div>
-                                                    )}
-                                                </td>
-                                            );
-                                        })}
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
+                                                    </div>
+                                                )}
+                                                {alumnosHoy.length === 0 && cancelacionesHoy.length === 0 && !esFeriado && (
+                                                    <div style={{color: '#bbb', fontStyle: 'italic', fontSize: '0.9rem'}}>Sin alumnos anotados</div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            );
+                        })()
+                    )}
                 </div>
             );
         }
@@ -2373,6 +2475,7 @@
                         <FormularioAlumno 
                             alumno={alumnoEditando}
                             horarios={horarios}
+                            alumnos={alumnos}
                             onClose={() => setAlumnoEditando(null)}
                             onSave={async (alumnoActualizado) => {
                                 await guardarCambios('alumno', alumnoActualizado);
@@ -2386,6 +2489,7 @@
                         <FormularioAlumno 
                             alumno={null}
                             horarios={horarios}
+                            alumnos={alumnos}
                             onClose={() => setMostrarNuevo(false)}
                             onSave={async (nuevoAlumno) => {
                                 const maxId = Math.max(...alumnos.map(a => parseInt(a.id)), 0) + 1;
@@ -2399,7 +2503,8 @@
             );
         }
         
-        function FormularioAlumno({ alumno, onClose, onSave, precios, horarios }) {
+        function FormularioAlumno({ alumno, onClose, onSave, precios, horarios, alumnos }) {
+            const CAPACIDAD_MAX = 5;
             const [datos, setDatos] = useState(alumno || {
                 nombre: '',
                 apellido: '',
@@ -2411,6 +2516,13 @@
                 horariosAsignados: [],
                 activo: true
             });
+            
+            // Contar cuántos alumnos (excl. el actual) ya tienen un slot
+            const contarOcupados = (clave) => {
+                return (alumnos || []).filter(a => 
+                    a.id !== (alumno?.id) && (a.horariosAsignados || []).includes(clave)
+                ).length;
+            };
             
             const clasesMap = {
                 '1x_semana': 4,
@@ -2429,6 +2541,11 @@
                 if (actuales.includes(clave)) {
                     setDatos({...datos, horariosAsignados: actuales.filter(h => h !== clave)});
                 } else {
+                    const ocupados = contarOcupados(clave);
+                    if (ocupados >= CAPACIDAD_MAX) {
+                        alert(`⛔ Este horario ya tiene ${ocupados}/${CAPACIDAD_MAX} alumnos. No se pueden agregar más.`);
+                        return;
+                    }
                     setDatos({...datos, horariosAsignados: [...actuales, clave]});
                 }
             };
@@ -2517,24 +2634,32 @@
                                             {horarios[dia].map(hora => {
                                                 const clave = `${dia}-${hora}`;
                                                 const seleccionado = (datos.horariosAsignados || []).includes(clave);
+                                                const ocupados = contarOcupados(clave);
+                                                const lleno = !seleccionado && ocupados >= CAPACIDAD_MAX;
                                                 return (
                                                     <button
                                                         key={hora}
                                                         type="button"
                                                         onClick={() => toggleHorario(dia, hora)}
+                                                        disabled={lleno}
+                                                        title={lleno ? `Lleno (${ocupados}/${CAPACIDAD_MAX})` : `${ocupados}/${CAPACIDAD_MAX} ocupados`}
                                                         style={{
                                                             padding: '8px 16px',
                                                             borderRadius: '8px',
-                                                            border: `2px solid ${seleccionado ? '#667eea' : '#dee2e6'}`,
-                                                            background: seleccionado ? '#667eea' : 'white',
-                                                            color: seleccionado ? 'white' : '#495057',
-                                                            cursor: 'pointer',
+                                                            border: `2px solid ${seleccionado ? '#667eea' : lleno ? '#e9ecef' : '#dee2e6'}`,
+                                                            background: seleccionado ? '#667eea' : lleno ? '#f5f5f5' : 'white',
+                                                            color: seleccionado ? 'white' : lleno ? '#aaa' : '#495057',
+                                                            cursor: lleno ? 'not-allowed' : 'pointer',
                                                             fontWeight: seleccionado ? 700 : 400,
                                                             fontSize: '0.9rem',
-                                                            transition: 'all 0.2s'
+                                                            transition: 'all 0.2s',
+                                                            opacity: lleno ? 0.6 : 1
                                                         }}
                                                     >
                                                         {seleccionado ? '✓ ' : ''}{hora}
+                                                        <span style={{fontSize: '0.75rem', marginLeft: '4px', opacity: 0.8}}>
+                                                            {seleccionado ? '' : lleno ? '⛔ lleno' : `${ocupados}/${CAPACIDAD_MAX}`}
+                                                        </span>
                                                     </button>
                                                 );
                                             })}
