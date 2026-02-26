@@ -2049,12 +2049,12 @@
             
             const obtenerHorariosConClasesEnFecha = (fecha) => {
                 const diaSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][fecha.getDay()];
-                const horariosDelDia = [...new Set(
-                    alumnos
-                        .filter(a => (a.horariosAsignados || []).some(h => h.split('-')[0] === diaSemana))
-                        .flatMap(a => (a.horariosAsignados || []).filter(h => h.split('-')[0] === diaSemana).map(h => h.split('-')[1]))
-                )].sort();
-                return horariosDelDia;
+                // Incluir horarios activos del tab Horarios (aunque no tengan alumnos aún)
+                const horariosActivos = horarios[diaSemana] || [];
+                const horariosConAlumnos = alumnos
+                    .filter(a => (a.horariosAsignados || []).some(h => h.split('-')[0] === diaSemana))
+                    .flatMap(a => (a.horariosAsignados || []).filter(h => h.split('-')[0] === diaSemana).map(h => h.split('-')[1]));
+                return [...new Set([...horariosActivos, ...horariosConAlumnos])].sort();
             };
             
             const diasSemana = obtenerDiasDeSemanConClases();
@@ -2119,7 +2119,8 @@
                                         </td>
                                         {diasSemana.map((fecha, i) => {
                                             const diaSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][fecha.getDay()];
-                                            const tieneHorarioEnDia = alumnos.some(a => (a.horariosAsignados || []).includes(`${diaSemana}-${hora}`)) ||
+                                            const tieneHorarioEnDia = (horarios[diaSemana] || []).includes(hora) ||
+                                                alumnos.some(a => (a.horariosAsignados || []).includes(`${diaSemana}-${hora}`)) ||
                                                 (recuperos || []).some(r => r.fecha === fechaLocal(fecha) && r.hora === hora && r.estado === 'aprobado');
                                             
                                             if (!tieneHorarioEnDia) {
@@ -2433,6 +2434,7 @@
                         <FormularioAlumno 
                             alumno={alumnoEditando}
                             horarios={horarios}
+                            alumnos={alumnos}
                             onClose={() => setAlumnoEditando(null)}
                             onSave={async (alumnoActualizado) => {
                                 await guardarCambios('alumno', alumnoActualizado);
@@ -2446,6 +2448,7 @@
                         <FormularioAlumno 
                             alumno={null}
                             horarios={horarios}
+                            alumnos={alumnos}
                             onClose={() => setMostrarNuevo(false)}
                             onSave={async (nuevoAlumno) => {
                                 const maxId = Math.max(...alumnos.map(a => parseInt(a.id)), 0) + 1;
@@ -2459,7 +2462,7 @@
             );
         }
         
-        function FormularioAlumno({ alumno, onClose, onSave, precios, horarios }) {
+        function FormularioAlumno({ alumno, onClose, onSave, precios, horarios, alumnos }) {
             const [datos, setDatos] = useState(alumno || {
                 nombre: '',
                 apellido: '',
@@ -2489,6 +2492,19 @@
                 if (actuales.includes(clave)) {
                     setDatos({...datos, horariosAsignados: actuales.filter(h => h !== clave)});
                 } else {
+                    // Verificar capacidad: contar alumnos activos en ese slot (excluyendo al alumno actual)
+                    const CAPACIDAD_MAX = 5;
+                    const alumnosEnSlot = (alumnos || []).filter(a => 
+                        a.id !== datos.id && (a.horariosAsignados || []).includes(clave)
+                    ).length;
+                    if (alumnosEnSlot >= CAPACIDAD_MAX) {
+                        alert(`⚠️ El horario ${dia} ${hora} ya tiene ${alumnosEnSlot} alumnos (máximo ${CAPACIDAD_MAX}). No se puede agregar más alumnos a este horario.`);
+                        return;
+                    }
+                    if (alumnosEnSlot === CAPACIDAD_MAX - 1) {
+                        // Slot que quedará lleno — avisar pero permitir
+                        if (!window.confirm(`⚠️ Al asignar a ${datos.nombre || 'este alumno'} al horario ${dia} ${hora}, el turno quedará COMPLETO (${CAPACIDAD_MAX}/${CAPACIDAD_MAX}).\n\n¿Confirmás?`)) return;
+                    }
                     setDatos({...datos, horariosAsignados: [...actuales, clave]});
                 }
             };
@@ -2577,24 +2593,34 @@
                                             {horarios[dia].map(hora => {
                                                 const clave = `${dia}-${hora}`;
                                                 const seleccionado = (datos.horariosAsignados || []).includes(clave);
+                                                const CAPACIDAD_MAX = 5;
+                                                const ocupados = (alumnos || []).filter(a => 
+                                                    a.id !== datos.id && (a.horariosAsignados || []).includes(clave)
+                                                ).length;
+                                                const lleno = ocupados >= CAPACIDAD_MAX;
+                                                const casiLleno = ocupados === CAPACIDAD_MAX - 1;
                                                 return (
                                                     <button
                                                         key={hora}
                                                         type="button"
                                                         onClick={() => toggleHorario(dia, hora)}
+                                                        title={`${ocupados}/${CAPACIDAD_MAX} alumnos`}
                                                         style={{
                                                             padding: '8px 16px',
                                                             borderRadius: '8px',
-                                                            border: `2px solid ${seleccionado ? '#667eea' : '#dee2e6'}`,
-                                                            background: seleccionado ? '#667eea' : 'white',
-                                                            color: seleccionado ? 'white' : '#495057',
-                                                            cursor: 'pointer',
+                                                            border: `2px solid ${seleccionado ? '#667eea' : lleno && !seleccionado ? '#dc3545' : '#dee2e6'}`,
+                                                            background: seleccionado ? '#667eea' : lleno && !seleccionado ? '#f8d7da' : 'white',
+                                                            color: seleccionado ? 'white' : lleno && !seleccionado ? '#721c24' : '#495057',
+                                                            cursor: lleno && !seleccionado ? 'not-allowed' : 'pointer',
                                                             fontWeight: seleccionado ? 700 : 400,
                                                             fontSize: '0.9rem',
                                                             transition: 'all 0.2s'
                                                         }}
                                                     >
-                                                        {seleccionado ? '✓ ' : ''}{hora}
+                                                        {seleccionado ? '✓ ' : lleno && !seleccionado ? '🚫 ' : ''}{hora}
+                                                        <span style={{fontSize: '0.75rem', marginLeft: '4px', opacity: 0.8}}>
+                                                            {seleccionado ? '' : `(${ocupados}/${CAPACIDAD_MAX}${lleno ? ' lleno' : casiLleno ? ' ⚠️' : ''})`}
+                                                        </span>
                                                     </button>
                                                 );
                                             })}
