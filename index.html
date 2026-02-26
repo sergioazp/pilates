@@ -2049,12 +2049,12 @@
             
             const obtenerHorariosConClasesEnFecha = (fecha) => {
                 const diaSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][fecha.getDay()];
-                // Incluir horarios activos del tab Horarios (aunque no tengan alumnos aún)
-                const horariosActivos = horarios[diaSemana] || [];
-                const horariosConAlumnos = alumnos
-                    .filter(a => (a.horariosAsignados || []).some(h => h.split('-')[0] === diaSemana))
-                    .flatMap(a => (a.horariosAsignados || []).filter(h => h.split('-')[0] === diaSemana).map(h => h.split('-')[1]));
-                return [...new Set([...horariosActivos, ...horariosConAlumnos])].sort();
+                const horariosDelDia = [...new Set(
+                    alumnos
+                        .filter(a => (a.horariosAsignados || []).some(h => h.split('-')[0] === diaSemana))
+                        .flatMap(a => (a.horariosAsignados || []).filter(h => h.split('-')[0] === diaSemana).map(h => h.split('-')[1]))
+                )].sort();
+                return horariosDelDia;
             };
             
             const diasSemana = obtenerDiasDeSemanConClases();
@@ -2119,8 +2119,7 @@
                                         </td>
                                         {diasSemana.map((fecha, i) => {
                                             const diaSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][fecha.getDay()];
-                                            const tieneHorarioEnDia = (horarios[diaSemana] || []).includes(hora) ||
-                                                alumnos.some(a => (a.horariosAsignados || []).includes(`${diaSemana}-${hora}`)) ||
+                                            const tieneHorarioEnDia = alumnos.some(a => (a.horariosAsignados || []).includes(`${diaSemana}-${hora}`)) ||
                                                 (recuperos || []).some(r => r.fecha === fechaLocal(fecha) && r.hora === hora && r.estado === 'aprobado');
                                             
                                             if (!tieneHorarioEnDia) {
@@ -2259,13 +2258,39 @@
             const [alumnoEditando, setAlumnoEditando] = useState(null);
             const [mostrarNuevo, setMostrarNuevo] = useState(false);
             const [reseteando, setReseteando] = useState(null);
-            
+            const [registrandoPago, setRegistrandoPago] = useState(null);
+
+            // Mes actual en formato "YYYY-MM" para comparar con pagoMes guardado
+            const mesActual = (() => {
+                const hoy = new Date();
+                return `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`;
+            })();
+
+            const pagaEstesMes = (alumno) => alumno.pagoMes === mesActual;
+
+            const handleTogglePago = async (alumno) => {
+                const yaPago = pagaEstesMes(alumno);
+                if (yaPago) {
+                    // Desmarcar — confirmar por si fue error
+                    if (!window.confirm(`¿Desmarcar el pago de ${alumno.nombre} ${alumno.apellido}?\n\nQuedará como "sin pago registrado" para ${mesActual}.`)) return;
+                }
+                setRegistrandoPago(alumno.id);
+                try {
+                    const alumnoActualizado = { ...alumno, pagoMes: yaPago ? null : mesActual };
+                    await db.collection('alumnos').doc(alumno.id).update({ pagoMes: yaPago ? null : mesActual });
+                } catch(e) {
+                    console.error(e);
+                    alert('❌ Error al registrar pago. Revisá la consola.');
+                } finally {
+                    setRegistrandoPago(null);
+                }
+            };
+
             const handleResetear = async (alumno) => {
                 if (!window.confirm(`¿Resetear el historial de ${alumno.nombre} ${alumno.apellido}?\n\nEsto borrará todas sus cancelaciones, recuperos y solicitudes pendientes, y pondrá sus contadores en cero.`)) return;
                 setReseteando(alumno.id);
                 try {
                     await FirebaseService.resetearAlumno(alumno.id);
-                    // Los listeners se encargan de actualizar automáticamente
                     alert(`✅ Historial de ${alumno.nombre} reseteado`);
                 } catch(e) {
                     console.error(e);
@@ -2283,7 +2308,49 @@
                     return (a.nombre + ' ' + a.apellido).toLowerCase().includes(q) || a.email.toLowerCase().includes(q);
                 })
                 .sort((a, b) => (a.apellido + a.nombre).localeCompare(b.apellido + b.nombre));
-            
+
+            // Estilos reutilizables para el botón pago
+            const estiloBotonPago = (pagado, cargando) => ({
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '9px 14px',
+                border: `2px solid ${pagado ? '#28a745' : '#dee2e6'}`,
+                borderRadius: '8px',
+                background: pagado ? '#d4edda' : 'white',
+                color: pagado ? '#155724' : '#6c757d',
+                fontWeight: 600,
+                fontSize: '0.85rem',
+                cursor: cargando ? 'wait' : 'pointer',
+                transition: 'all 0.2s',
+                width: '100%',
+                marginTop: '6px',
+                justifyContent: 'center',
+            });
+
+            // Botón pequeño ↻ resetear
+            const BtnResetear = ({ alumno }) => (
+                <button
+                    onClick={(e) => { e.stopPropagation(); handleResetear(alumno); }}
+                    disabled={reseteando === alumno.id}
+                    title="Resetear historial"
+                    style={{
+                        background: 'none',
+                        border: '1px solid #dee2e6',
+                        borderRadius: '6px',
+                        padding: '3px 7px',
+                        fontSize: '0.8rem',
+                        color: '#adb5bd',
+                        cursor: reseteando === alumno.id ? 'wait' : 'pointer',
+                        lineHeight: 1,
+                        transition: 'all 0.2s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor='#dc3545'; e.currentTarget.style.color='#dc3545'; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor='#dee2e6'; e.currentTarget.style.color='#adb5bd'; }}
+                >
+                    {reseteando === alumno.id ? '⏳' : '↻'}
+                </button>
+            );
             
             return (
                 <div>
@@ -2328,9 +2395,16 @@
                     {/* VISTA TARJETAS */}
                     {!vistaLista && (
                         <div className="grid">
-                            {alumnosFiltrados.map(alumno => (
-                                <div key={alumno.id} className="card">
-                                    <h3 style={{marginBottom: '8px'}}>{alumno.nombre} {alumno.apellido}</h3>
+                            {alumnosFiltrados.map(alumno => {
+                                const pagado = pagaEstesMes(alumno);
+                                const cargandoPago = registrandoPago === alumno.id;
+                                return (
+                                <div key={alumno.id} className="card" style={{borderColor: pagado ? '#28a745' : undefined}}>
+                                    {/* Nombre + botón ↻ */}
+                                    <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px'}}>
+                                        <h3 style={{margin: 0}}>{alumno.nombre} {alumno.apellido}</h3>
+                                        <BtnResetear alumno={alumno} />
+                                    </div>
                                     <div style={{marginBottom: '8px'}}>
                                         <span className={`badge ${alumno.activo ? 'badge-success' : 'badge-danger'}`}>
                                             {alumno.activo ? 'Activo' : 'Inactivo'}
@@ -2359,16 +2433,17 @@
                                     <button className="btn btn-primary" style={{width: '100%', marginTop: '12px'}} onClick={() => setAlumnoEditando(alumno)}>
                                         ✎ Editar
                                     </button>
-                                    <button 
-                                        className="btn btn-danger" 
-                                        style={{width: '100%', marginTop: '6px', fontSize: '0.85rem', padding: '8px'}} 
-                                        onClick={() => handleResetear(alumno)}
-                                        disabled={reseteando === alumno.id}
+                                    {/* Botón registrar pago */}
+                                    <button
+                                        onClick={() => handleTogglePago(alumno)}
+                                        disabled={cargandoPago}
+                                        style={estiloBotonPago(pagado, cargandoPago)}
                                     >
-                                        {reseteando === alumno.id ? '⏳ Reseteando...' : '↻ Resetear historial'}
+                                        {cargandoPago ? '⏳ Guardando...' : pagado ? '✅ Pago registrado' : '💳 Registrar pago'}
                                     </button>
                                 </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                     
@@ -2384,13 +2459,22 @@
                                         <th>Clases</th>
                                         <th>Horarios</th>
                                         <th>Estado</th>
+                                        <th>Pago</th>
                                         <th></th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {alumnosFiltrados.map(alumno => (
+                                    {alumnosFiltrados.map(alumno => {
+                                        const pagado = pagaEstesMes(alumno);
+                                        const cargandoPago = registrandoPago === alumno.id;
+                                        return (
                                         <tr key={alumno.id}>
-                                            <td style={{fontWeight: 600}}>{alumno.apellido}, {alumno.nombre}</td>
+                                            <td>
+                                                <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
+                                                    <span style={{fontWeight: 600}}>{alumno.apellido}, {alumno.nombre}</span>
+                                                    <BtnResetear alumno={alumno} />
+                                                </div>
+                                            </td>
                                             <td style={{fontSize: '0.85rem', color: '#6c757d'}}>{alumno.email}</td>
                                             <td><span className="badge badge-info">{alumno.abono.replace('_', ' ')}</span></td>
                                             <td>
@@ -2406,21 +2490,33 @@
                                                 </span>
                                             </td>
                                             <td>
+                                                <button
+                                                    onClick={() => handleTogglePago(alumno)}
+                                                    disabled={cargandoPago}
+                                                    title={pagado ? `Pago registrado (${alumno.pagoMes}) — click para desmarcar` : 'Registrar pago de este mes'}
+                                                    style={{
+                                                        padding: '5px 12px',
+                                                        border: `2px solid ${pagado ? '#28a745' : '#dee2e6'}`,
+                                                        borderRadius: '8px',
+                                                        background: pagado ? '#d4edda' : 'white',
+                                                        color: pagado ? '#155724' : '#6c757d',
+                                                        fontWeight: 600,
+                                                        fontSize: '0.8rem',
+                                                        cursor: cargandoPago ? 'wait' : 'pointer',
+                                                        whiteSpace: 'nowrap',
+                                                    }}
+                                                >
+                                                    {cargandoPago ? '⏳' : pagado ? '✅ Pagó' : '💳 Registrar'}
+                                                </button>
+                                            </td>
+                                            <td>
                                                 <button className="btn btn-primary" style={{padding: '6px 14px', fontSize: '0.85rem'}} onClick={() => setAlumnoEditando(alumno)}>
                                                     ✎ Editar
                                                 </button>
-                                                <button 
-                                                    className="btn btn-danger" 
-                                                    style={{padding: '6px 10px', fontSize: '0.85rem', marginLeft: '5px'}} 
-                                                    onClick={() => handleResetear(alumno)}
-                                                    disabled={reseteando === alumno.id}
-                                                    title="Resetear historial"
-                                                >
-                                                    {reseteando === alumno.id ? '⏳' : '🔄'}
-                                                </button>
                                             </td>
                                         </tr>
-                                    ))}
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         </div>
@@ -2492,19 +2588,6 @@
                 if (actuales.includes(clave)) {
                     setDatos({...datos, horariosAsignados: actuales.filter(h => h !== clave)});
                 } else {
-                    // Verificar capacidad: contar alumnos activos en ese slot (excluyendo al alumno actual)
-                    const CAPACIDAD_MAX = 5;
-                    const alumnosEnSlot = (alumnos || []).filter(a => 
-                        a.id !== datos.id && (a.horariosAsignados || []).includes(clave)
-                    ).length;
-                    if (alumnosEnSlot >= CAPACIDAD_MAX) {
-                        alert(`⚠️ El horario ${dia} ${hora} ya tiene ${alumnosEnSlot} alumnos (máximo ${CAPACIDAD_MAX}). No se puede agregar más alumnos a este horario.`);
-                        return;
-                    }
-                    if (alumnosEnSlot === CAPACIDAD_MAX - 1) {
-                        // Slot que quedará lleno — avisar pero permitir
-                        if (!window.confirm(`⚠️ Al asignar a ${datos.nombre || 'este alumno'} al horario ${dia} ${hora}, el turno quedará COMPLETO (${CAPACIDAD_MAX}/${CAPACIDAD_MAX}).\n\n¿Confirmás?`)) return;
-                    }
                     setDatos({...datos, horariosAsignados: [...actuales, clave]});
                 }
             };
@@ -2593,34 +2676,24 @@
                                             {horarios[dia].map(hora => {
                                                 const clave = `${dia}-${hora}`;
                                                 const seleccionado = (datos.horariosAsignados || []).includes(clave);
-                                                const CAPACIDAD_MAX = 5;
-                                                const ocupados = (alumnos || []).filter(a => 
-                                                    a.id !== datos.id && (a.horariosAsignados || []).includes(clave)
-                                                ).length;
-                                                const lleno = ocupados >= CAPACIDAD_MAX;
-                                                const casiLleno = ocupados === CAPACIDAD_MAX - 1;
                                                 return (
                                                     <button
                                                         key={hora}
                                                         type="button"
                                                         onClick={() => toggleHorario(dia, hora)}
-                                                        title={`${ocupados}/${CAPACIDAD_MAX} alumnos`}
                                                         style={{
                                                             padding: '8px 16px',
                                                             borderRadius: '8px',
-                                                            border: `2px solid ${seleccionado ? '#667eea' : lleno && !seleccionado ? '#dc3545' : '#dee2e6'}`,
-                                                            background: seleccionado ? '#667eea' : lleno && !seleccionado ? '#f8d7da' : 'white',
-                                                            color: seleccionado ? 'white' : lleno && !seleccionado ? '#721c24' : '#495057',
-                                                            cursor: lleno && !seleccionado ? 'not-allowed' : 'pointer',
+                                                            border: `2px solid ${seleccionado ? '#667eea' : '#dee2e6'}`,
+                                                            background: seleccionado ? '#667eea' : 'white',
+                                                            color: seleccionado ? 'white' : '#495057',
+                                                            cursor: 'pointer',
                                                             fontWeight: seleccionado ? 700 : 400,
                                                             fontSize: '0.9rem',
                                                             transition: 'all 0.2s'
                                                         }}
                                                     >
-                                                        {seleccionado ? '✓ ' : lleno && !seleccionado ? '🚫 ' : ''}{hora}
-                                                        <span style={{fontSize: '0.75rem', marginLeft: '4px', opacity: 0.8}}>
-                                                            {seleccionado ? '' : `(${ocupados}/${CAPACIDAD_MAX}${lleno ? ' lleno' : casiLleno ? ' ⚠️' : ''})`}
-                                                        </span>
+                                                        {seleccionado ? '✓ ' : ''}{hora}
                                                     </button>
                                                 );
                                             })}
