@@ -53,7 +53,7 @@
 
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: var(--bg);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             min-height: 100dvh;
             padding: 20px;
@@ -2030,12 +2030,11 @@
             
             const obtenerHorariosConClasesEnFecha = (fecha) => {
                 const diaSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][fecha.getDay()];
-                const horariosDelDia = [...new Set(
-                    alumnos
-                        .filter(a => (a.horariosAsignados || []).some(h => h.split('-')[0] === diaSemana))
-                        .flatMap(a => (a.horariosAsignados || []).filter(h => h.split('-')[0] === diaSemana).map(h => h.split('-')[1]))
-                )].sort();
-                return horariosDelDia;
+                const horariosActivos = horarios[diaSemana] || [];
+                const horariosConAlumnos = alumnos
+                    .filter(a => (a.horariosAsignados || []).some(h => h.split('-')[0] === diaSemana))
+                    .flatMap(a => (a.horariosAsignados || []).filter(h => h.split('-')[0] === diaSemana).map(h => h.split('-')[1]));
+                return [...new Set([...horariosActivos, ...horariosConAlumnos])].sort();
             };
             
             const diasSemana = obtenerDiasDeSemanConClases();
@@ -2100,7 +2099,8 @@
                                         </td>
                                         {diasSemana.map((fecha, i) => {
                                             const diaSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][fecha.getDay()];
-                                            const tieneHorarioEnDia = alumnos.some(a => (a.horariosAsignados || []).includes(`${diaSemana}-${hora}`)) ||
+                                            const tieneHorarioEnDia = (horarios[diaSemana] || []).includes(hora) ||
+                                                alumnos.some(a => (a.horariosAsignados || []).includes(`${diaSemana}-${hora}`)) ||
                                                 (recuperos || []).some(r => r.fecha === fechaLocal(fecha) && r.hora === hora && r.estado === 'aprobado');
                                             
                                             if (!tieneHorarioEnDia) {
