@@ -2967,31 +2967,17 @@
                             return;
                         }
                         
-                        // 2. Obtener el alumno
-                        const alumno = alumnos.find(a => a.id === solicitud.alumnoId);
-                        if (!alumno) {
-                            alert('❌ No se encontró el alumno');
-                            return;
-                        }
-                        
-                        // 3. Restaurar clasesPendientes (incrementar en 1)
-                        const alumnoActualizado = {
-                            ...alumno,
-                            clasesPendientes: (alumno.clasesPendientes || 0) + 1
-                        };
-                        
-                        // 4. Marcar solicitud como rechazada (no eliminarla)
+                        // 2. Marcar solicitud como rechazada (no eliminarla)
+                        // NO tocamos clasesPendientes: ya se incrementó al cancelar
+                        // y nunca se decrementó al crear la solicitud, así que sigue correcto.
                         const solicitudActualizada = {
                             ...solicitud,
                             estado: 'rechazada'
                         };
                         
-                        // 5. Guardar cambios en Firebase
-                        await FirebaseService.guardarAlumno(alumnoActualizado);
                         await FirebaseService.guardarSolicitud(solicitudActualizada);
                         
-                        // Los listeners se encargan de actualizar automáticamente
-                        alert(`✅ Solicitud rechazada. Se restauró 1 clase a recuperar para ${solicitud.alumnoNombre}`);
+                        alert(`✅ Solicitud rechazada para ${solicitud.alumnoNombre}`);
                     } catch (error) {
                         console.error('Error al rechazar solicitud:', error);
                         alert('❌ Error al rechazar solicitud');
@@ -3529,13 +3515,15 @@
                         
                         if (libres <= 0) continue;
                         
-                        // El alumno ya tiene clase ahí ese día (regular o recupero)
-                        const yaTimeneClase = (alumno.horariosAsignados || []).includes(`${diaSemana}-${hora}`) &&
-                            !cancelacionesAlumno.some(c => c.alumnoId === alumno.id && c.fecha === fechaStr && c.hora === hora);
+                        // El alumno tiene ese horario como clase regular → nunca mostrar como recupero
+                        const esSuHorarioRegular = (alumno.horariosAsignados || []).includes(`${diaSemana}-${hora}`);
+                        if (esSuHorarioRegular) continue;
+
+                        // El alumno ya tiene recupero aprobado en ese slot
                         const yaTimeneRecupero = (recuperos || []).some(r => 
                             r.alumnoId === alumno.id && r.fecha === fechaStr && r.hora === hora && r.estado === 'aprobado'
                         );
-                        if (yaTimeneClase || yaTimeneRecupero) continue;
+                        if (yaTimeneRecupero) continue;
                         
                         // Ya tiene solicitud pendiente para ese slot
                         const yaSolicito = solicitudes.some(s => 
@@ -3576,12 +3564,12 @@
                     <h2 style={{marginBottom: '10px'}}>Recuperar Clases</h2>
                     
                     {solicitudesRechazadas.length > 0 && (
-                        <div className="alert alert-danger" style={{marginBottom: '20px'}}>
-                            <strong>⚠️ Solicitudes rechazadas</strong>
-                            <p style={{marginTop: '8px', marginBottom: '0'}}>Las siguientes solicitudes fueron rechazadas por la profesora. Podés solicitar otro horario:</p>
+                        <div className="alert alert-warning" style={{marginBottom: '20px'}}>
+                            <strong>😕 No pudimos asignarte ese horario</strong>
+                            <p style={{marginTop: '8px', marginBottom: '0'}}>Por favor elegí otro de los disponibles:</p>
                             {solicitudesRechazadas.map(s => (
-                                <div key={s.id} style={{fontSize: '0.9rem', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(114, 28, 36, 0.3)'}}>
-                                    {formatearFecha(s.fecha)} a las {s.hora} — {s.razon || 'Sin motivo especificado'}
+                                <div key={s.id} style={{fontSize: '0.9rem', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(133, 100, 4, 0.2)'}}>
+                                    {formatearFecha(s.fecha)} a las {s.hora}
                                 </div>
                             ))}
                         </div>
